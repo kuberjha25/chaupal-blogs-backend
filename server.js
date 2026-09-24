@@ -36,6 +36,19 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Chaupal Te Charcha API chal rahi hai → http://localhost:${PORT}`);
-});
+
+/* MERN-style boot: pehla DB apne aap ensure (create + schema + first-time seed),
+   phir hi listen. Data pehla ton hai ta bootstrap kuchh nahi chhedta. */
+const { ensureDatabase, seedMode } = require('./database/bootstrap');
+
+(async () => {
+  try {
+    await ensureDatabase();
+  } catch (e) {
+    console.error('\nDB bootstrap fail — server start nahi hoya.\n' + e.message + '\n');
+    process.exit(1);
+  }
+  app.listen(PORT, () => {
+    console.log(`Chaupal Te Charcha API chal rahi hai → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);
+  });
+})();

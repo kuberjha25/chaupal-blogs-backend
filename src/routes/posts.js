@@ -57,8 +57,8 @@ router.get(
     );
     const post = rows[0];
     if (!post) return res.status(404).json({ error: 'Post nahi mila' });
-    if (isOwnOnly(req) && post.author_id !== req.user.id)
-      return res.status(403).json({ error: 'Eh post tuhada nahi hai' });
+      if (isOwnOnly(req) && post.author_id !== req.user.id)
+        return res.status(403).json({ error: 'This post does not belong to you' });
     const tags = await q(
       'SELECT t.name FROM tags t JOIN post_tags pt ON pt.tag_id = t.id WHERE pt.post_id = ?',
       [post.id]
