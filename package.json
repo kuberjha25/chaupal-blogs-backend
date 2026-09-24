@@ -1,0 +1,26 @@
+{
+  "name": "chaupal-te-charcha-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chaupal Te Charcha — Express + MySQL API (port 4000)",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "seed": "node database/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.11.0",
+    "sanitize-html": "^2.13.0",
+    "sharp": "^0.33.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
