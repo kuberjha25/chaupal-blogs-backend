@@ -20,10 +20,14 @@ function permsFor(role) {
   return PERMS[role] || [];
 }
 
+/* 'dev-secret' sirf development me. Production me server.js boot pe hi JWT_SECRET verify karta hai. */
+const jwtSecret = () =>
+  process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? undefined : 'dev-secret');
+
 function sign(user) {
   return jwt.sign(
     { id: user.id, role: user.role, name: user.name },
-    process.env.JWT_SECRET || 'dev-secret',
+    jwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES || '7d' }
   );
 }
@@ -33,7 +37,7 @@ function requireAuth(req, res, next) {
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Login required' });
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
+    req.user = jwt.verify(token, jwtSecret());
     req.user.permissions = permsFor(req.user.role);
     next();
   } catch (e) {

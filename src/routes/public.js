@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { q } = require('../db');
 const { a, injectToc } = require('../utils');
+const { publicWriteLimiter } = require('../middleware/rateLimit');
 
 /* Scheduled posts jinke time aa gaya = live */
 const PUB = `(p.status = 'published' OR (p.status = 'scheduled' AND p.scheduled_at <= NOW()))`;
@@ -136,6 +137,7 @@ router.get(
 /* ---------------- POLL VOTE ---------------- */
 router.post(
   '/polls/:id/vote',
+  publicWriteLimiter,
   a(async (req, res) => {
     const { optionId } = req.body || {};
     const opt = await q('SELECT id FROM poll_options WHERE id = ? AND poll_id = ?', [optionId, req.params.id]);
@@ -149,6 +151,7 @@ router.post(
 /* ---------------- QUIZ PLAY COUNT ---------------- */
 router.post(
   '/quizzes/:id/play',
+  publicWriteLimiter,
   a(async (req, res) => {
     await q('UPDATE quizzes SET plays = plays + 1 WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
@@ -158,6 +161,7 @@ router.post(
 /* ---------------- NEWSLETTER ---------------- */
 router.post(
   '/newsletter',
+  publicWriteLimiter,
   a(async (req, res) => {
     const email = String((req.body || {}).email || '').toLowerCase().trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Sahi email likho' });
@@ -169,6 +173,7 @@ router.post(
 /* ---------------- COMMENT SUBMIT (moderation queue vich jaanda) ---------------- */
 router.post(
   '/posts/:slug/comments',
+  publicWriteLimiter,
   a(async (req, res) => {
     const { name, body } = req.body || {};
     if (!name || !body) return res.status(400).json({ error: 'Naam te comment dono chahide' });

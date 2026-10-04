@@ -53,13 +53,24 @@ const quizConfig = {
   },
 };
 
+/* Production me default password naal admin kade nahi banana */
+function assertAdminPassword(pw = process.env.ADMIN_PASSWORD) {
+  if (process.env.NODE_ENV === 'production' && (!pw || pw === 'CHANGE_ME')) {
+    throw new Error(
+      'ADMIN_PASSWORD is missing or CHANGE_ME — production first admin nahi banaya. Set ADMIN_PASSWORD in .env and restart.'
+    );
+  }
+}
+
 /* ================================================================
   ESSENTIAL — runs in production too (first boot, once)
   ================================================================ */
 async function essentialData(conn, opts = {}) {
   const adminName = opts.adminName || process.env.ADMIN_NAME || 'Ujjwal M.';
   const adminEmail = opts.adminEmail || process.env.ADMIN_EMAIL || 'admin@chaupal.com';
-  const adminPassword = opts.adminPassword || process.env.ADMIN_PASSWORD || 'Chaupal@123';
+  const envPassword = opts.adminPassword || process.env.ADMIN_PASSWORD;
+  assertAdminPassword(envPassword);
+  const adminPassword = envPassword || 'Chaupal@123';
 
   await conn.query(
     `INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')`,
@@ -257,4 +268,4 @@ async function dummyData(conn, opts = {}) {
     ('Mon', 4200), ('Tue', 5600), ('Wed', 4800), ('Thu', 6400), ('Fri', 10000), ('Sat', 8800), ('Sun', 7200)`);
 }
 
-module.exports = { essentialData, dummyData };
+module.exports = { essentialData, dummyData, assertAdminPassword };

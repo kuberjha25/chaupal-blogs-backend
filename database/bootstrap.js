@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
-const { essentialData, dummyData } = require('./data');
+const { essentialData, dummyData, assertAdminPassword } = require('./data');
 
 const DB = () => process.env.DB_NAME || 'chaupal_charcha';
 
@@ -116,6 +116,7 @@ async function ensureDatabase({ log = console.log } = {}) {
 
 /* CLI reset — DROP + fresh (destructive, sirf jaan-bujh ke) */
 async function resetDatabase(mode, { log = console.log } = {}) {
+  assertAdminPassword(); /* DROP se pehla check, taaki DB uda ke fail na ho */
   const conn = await connectWithRetry();
   try {
     log(`→ Database "${DB()}" DROP + fresh ${mode} seed...`);

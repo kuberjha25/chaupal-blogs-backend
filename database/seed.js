@@ -6,6 +6,16 @@
    "sab uda ke fresh start" waste hai. */
 
 require('dotenv').config();
+
+/* Production guard — eh script DATABASE DROP karda hai */
+if (process.env.NODE_ENV === 'production' && process.env.I_UNDERSTAND_THIS_DROPS_THE_DATABASE !== 'yes') {
+  console.error(
+    '\nRefusing to run: NODE_ENV=production and this script DROPs the database.\n' +
+      'If you really mean it, set I_UNDERSTAND_THIS_DROPS_THE_DATABASE=yes and run again.\n'
+  );
+  process.exit(1);
+}
+
 const { resetDatabase } = require('./bootstrap');
 
 const mode = process.argv.includes('--prod') ? 'essential' : 'demo';

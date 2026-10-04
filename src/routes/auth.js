@@ -3,9 +3,11 @@ const bcrypt = require('bcryptjs');
 const { q } = require('../db');
 const { a } = require('../utils');
 const { sign, permsFor, requireAuth } = require('../middleware/auth');
+const { loginLimiter } = require('../middleware/rateLimit');
 
 router.post(
   '/login',
+  loginLimiter,
   a(async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'Email te password dono chahide' });

@@ -1,9 +1,27 @@
 require('dotenv').config();
+
+/* Production fail-fast: zaroori env vars check. Sirf variable NAME print karo, value kade nahi. */
+if (process.env.NODE_ENV === 'production') {
+  const bad = [];
+  for (const k of ['JWT_SECRET', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']) {
+    if (!process.env[k]) bad.push(`${k} is missing`);
+  }
+  const s = process.env.JWT_SECRET;
+  if (s && (s === 'dev-secret' || s === 'CHANGE_ME' || s.length < 32)) {
+    bad.push('JWT_SECRET is a placeholder or shorter than 32 characters');
+  }
+  if (bad.length) {
+    console.error('\nProduction env invalid — server start nahi hoya:\n  - ' + bad.join('\n  - ') + '\n');
+    process.exit(1);
+  }
+}
+
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
 
 const app = express();
+app.set('trust proxy', 1);
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
 app.use(express.json({ limit: '4mb' }));
@@ -32,7 +50,10 @@ app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 /* Central error handler */
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(err.status || 500).json({ error: err.message || 'Server error' });
+  const status = err.status || 500;
+  /* Production me 5xx details (SQL errors wagairah) client nu nahi dikhane */
+  const hide = process.env.NODE_ENV === 'production' && status >= 500;
+  res.status(status).json({ error: hide ? 'Server error' : err.message || 'Server error' });
 });
 
 const PORT = process.env.PORT || 4000;
@@ -48,7 +69,7 @@ const { ensureDatabase, seedMode } = require('./database/bootstrap');
     console.error('\nDB bootstrap fail — server start nahi hoya.\n' + e.message + '\n');
     process.exit(1);
   }
-  app.listen(PORT, () => {
+  app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
     console.log(`Chaupal Te Charcha API chal rahi hai → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);
   });
 })();
