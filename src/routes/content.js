@@ -73,7 +73,7 @@ router.get(
       params.push(req.user.id);
     }
     const rows = await q(
-      `SELECT c.id, c.author_name, c.body, c.status, c.created_at, p.title AS post_title, p.slug AS post_slug
+      `SELECT c.id, c.reader_id, c.author_name, c.body, c.status, c.created_at, p.title AS post_title, p.slug AS post_slug
        FROM comments c JOIN posts p ON p.id = c.post_id
        WHERE ${where}
        ORDER BY c.created_at DESC LIMIT 100`,

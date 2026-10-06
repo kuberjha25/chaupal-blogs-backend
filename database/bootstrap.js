@@ -102,9 +102,109 @@ async function ensureTable(conn, name, createSql, log) {
   return true;
 }
 
+/* Column te FK alag-alag: je FK fail hove ta agli boot te dubara try (column pehla ton hon de bawajood) */
+async function ensureForeignKey(conn, table, name, ddl, log) {
+  const [rows] = await conn.query(
+    `SELECT 1 FROM information_schema.table_constraints
+     WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = ? AND constraint_type = 'FOREIGN KEY' LIMIT 1`,
+    [table, name]
+  );
+  if (rows.length) return false;
+  await conn.query(`ALTER TABLE \`${table}\` ADD CONSTRAINT \`${name}\` ${ddl}`);
+  log(`→ Migration: added foreign key ${table}.${name}`);
+  return true;
+}
+
+/* Readers (site de paathak) — staff (users) ton bilkul alag. Order zaroori: readers pehla, FK baad ch. */
+const READER_TABLES = [
+  [
+    'readers',
+    `CREATE TABLE IF NOT EXISTS readers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(60) NOT NULL,
+      email VARCHAR(120) NOT NULL UNIQUE,
+      password_hash VARCHAR(100) NOT NULL,
+      email_verified_at DATETIME NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      notif_status ENUM('unknown','granted','denied') NOT NULL DEFAULT 'unknown',
+      notif_updated_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_login_at DATETIME NULL
+    )`,
+  ],
+  [
+    'reader_otps',
+    `CREATE TABLE IF NOT EXISTS reader_otps (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(120) NOT NULL,
+      purpose ENUM('signup','reset') NOT NULL,
+      code_hash CHAR(64) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      attempts TINYINT NOT NULL DEFAULT 0,
+      used_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ip VARCHAR(64) NOT NULL DEFAULT '',
+      KEY idx_otp_email (email, created_at)
+    )`,
+  ],
+  [
+    'reader_sessions',
+    `CREATE TABLE IF NOT EXISTS reader_sessions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      reader_id INT NOT NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      last_seen_at DATETIME NULL,
+      ip VARCHAR(64) NOT NULL DEFAULT '',
+      user_agent VARCHAR(200) NOT NULL DEFAULT '',
+      CONSTRAINT fk_rs_reader FOREIGN KEY (reader_id) REFERENCES readers(id) ON DELETE CASCADE
+    )`,
+  ],
+  [
+    'push_subscriptions',
+    `CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      reader_id INT NOT NULL,
+      endpoint_hash CHAR(64) NOT NULL UNIQUE,
+      endpoint TEXT NOT NULL,
+      p256dh VARCHAR(200) NOT NULL,
+      auth VARCHAR(100) NOT NULL,
+      user_agent VARCHAR(200) NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_success_at DATETIME NULL,
+      failed_count INT NOT NULL DEFAULT 0,
+      CONSTRAINT fk_ps_reader FOREIGN KEY (reader_id) REFERENCES readers(id) ON DELETE CASCADE
+    )`,
+  ],
+  [
+    'notifications',
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(80) NOT NULL,
+      body VARCHAR(200) NOT NULL,
+      url VARCHAR(300) NOT NULL,
+      created_by INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      audience VARCHAR(30) NOT NULL,
+      target_count INT NOT NULL DEFAULT 0,
+      sent_count INT NOT NULL DEFAULT 0,
+      failed_count INT NOT NULL DEFAULT 0,
+      CONSTRAINT fk_notif_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+    )`,
+  ],
+];
+
 async function runMigrations(conn, log) {
   let changed = false;
   changed = (await ensureColumn(conn, 'users', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1', log)) || changed;
+  for (const [name, sql] of READER_TABLES) changed = (await ensureTable(conn, name, sql, log)) || changed;
+  changed = (await ensureColumn(conn, 'comments', 'reader_id', 'INT NULL', log)) || changed;
+  changed =
+    (await ensureForeignKey(
+      conn, 'comments', 'fk_c_reader',
+      'FOREIGN KEY (reader_id) REFERENCES readers(id) ON DELETE SET NULL', log
+    )) || changed;
   return changed;
 }
 
@@ -157,6 +257,7 @@ async function resetDatabase(mode, { log = console.log } = {}) {
     log(`→ Database "${DB()}" DROP + fresh ${mode} seed...`);
     await conn.query(`DROP DATABASE IF EXISTS \`${DB()}\`; CREATE DATABASE \`${DB()}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; USE \`${DB()}\`;`);
     await applySchemaIfMissing(conn, log);
+    await runMigrations(conn, log);
     await essentialData(conn);
     log('→ Essential data seeded');
     if (mode === 'demo') {
@@ -168,4 +269,4 @@ async function resetDatabase(mode, { log = console.log } = {}) {
   }
 }
 
-module.exports = { ensureDatabase, resetDatabase, seedMode, ensureColumn, ensureTable };
+module.exports = { ensureDatabase, resetDatabase, seedMode, ensureColumn, ensureTable, ensureForeignKey };

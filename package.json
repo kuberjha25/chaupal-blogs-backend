@@ -8,9 +8,11 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "seed": "node database/seed.js",
-    "seed:prod": "node database/seed.js --prod"
+    "seed:prod": "node database/seed.js --prod",
+    "vapid": "node scripts/vapid.js"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1146.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -20,7 +22,8 @@
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.11.0",
     "sanitize-html": "^2.13.0",
-    "sharp": "^0.33.4"
+    "sharp": "^0.33.4",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"

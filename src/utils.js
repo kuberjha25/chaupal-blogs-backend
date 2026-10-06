@@ -10,6 +10,15 @@ const slugify = (s) =>
     .replace(/-+/g, '-')
     .slice(0, 90) || 'post';
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/* true/false/1/0/'1'/'0'/'true'/'false' → 1/0, baaki null */
+function parseActive(v) {
+  if (v === true || v === 1 || v === '1' || v === 'true') return 1;
+  if (v === false || v === 0 || v === '0' || v === 'false') return 0;
+  return null;
+}
+
 /* Express async route wrapper */
 const a = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -58,4 +67,4 @@ function injectToc(html) {
   return { html: out, toc };
 }
 
-module.exports = { slugify, a, cleanBody, injectToc };
+module.exports = { slugify, a, cleanBody, injectToc, EMAIL_RE, parseActive };

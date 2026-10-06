@@ -39,11 +39,13 @@ app.get('/api/health', (req, res) => res.json({ ok: true, service: 'chaupal-te-c
 
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/public', require('./src/routes/public'));
+app.use('/api/reader', require('./src/routes/reader'));
 app.use('/api/admin/posts', require('./src/routes/posts'));
 app.use('/api/admin/media', require('./src/routes/media'));
 app.use('/api/admin', require('./src/routes/content'));
 app.use('/api/admin', require('./src/routes/growth'));
 app.use('/api/admin', require('./src/routes/core'));
+app.use('/api/admin', require('./src/routes/readersAdmin'));
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
@@ -69,6 +71,10 @@ const { ensureDatabase, seedMode } = require('./database/bootstrap');
     console.error('\nDB bootstrap fail — server start nahi hoya.\n' + e.message + '\n');
     process.exit(1);
   }
+  /* Email config galat hove ta server fir bhi chalda; sirf reader signup/forgot 503 */
+  const mail = require('./src/mailer').status();
+  if (!mail.ok) console.warn(`→ Reader email disabled: ${mail.reason} (signup/forgot return 503)`);
+  if (!process.env.VAPID_PUBLIC_KEY) console.warn('→ Web push disabled: VAPID_* env not set (npm run vapid)');
   app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
     console.log(`Chaupal Te Charcha API chal rahi hai → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);
   });

@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
-const { pool, q } = require('../db');
-const { a } = require('../utils');
+const { q, tx } = require('../db');
+const { a, EMAIL_RE, parseActive } = require('../utils');
 const { requireAuth, requirePerm, isOwnOnly, PERMS, ROLES } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -54,8 +54,6 @@ router.get(
 );
 
 /* ---------------- USERS (admin only) ---------------- */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 /* 10+ characters, ghatt ton ghatt ik letter te ik digit.
    bcrypt 72 bytes ton baad chup-chaap kat dinda hai, isliye upar di limit bhi. */
 function passwordError(pw) {
@@ -71,33 +69,12 @@ function cleanName(v) {
   return name && name.length <= 80 ? name : null;
 }
 
-function parseActive(v) {
-  if (v === true || v === 1 || v === '1' || v === 'true') return 1;
-  if (v === false || v === 0 || v === '0' || v === 'false') return 0;
-  return null;
-}
-
 /* Saare active admins lock (hamesha ik hi order) — do concurrent demotions dono pass na ho jaan */
 async function lockActiveAdmins(conn) {
   const [rows] = await conn.query(
     "SELECT id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
   );
   return rows.map((r) => r.id);
-}
-
-async function inTransaction(fn) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const out = await fn(conn);
-    await conn.commit();
-    return out;
-  } catch (e) {
-    await conn.rollback().catch(() => {});
-    throw e;
-  } finally {
-    conn.release();
-  }
 }
 
 router.get(
@@ -171,7 +148,7 @@ const updateUser = a(async (req, res) => {
   if (id === req.user.id && demotes)
     return res.status(400).json({ error: 'Admin apne aap nu demote ya deactivate nahi kar sakda' });
 
-  const result = await inTransaction(async (conn) => {
+  const result = await tx(async (conn) => {
     const admins = await lockActiveAdmins(conn);
     const [rows] = await conn.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [id]);
     if (!rows[0]) return { status: 404, error: 'User nahi mila' };
@@ -197,7 +174,7 @@ router.delete(
     const id = Number(req.params.id);
     if (id === req.user.id)
       return res.status(400).json({ error: 'Apne aap nu delete nahi kar sakde' });
-    const blocked = await inTransaction(async (conn) => {
+    const blocked = await tx(async (conn) => {
       const admins = await lockActiveAdmins(conn);
       if (admins.includes(id) && admins.length <= 1) return true;
       await conn.query('DELETE FROM users WHERE id = ?', [id]);

@@ -7,14 +7,14 @@ const PERMS = {
   admin: [
     'dashboard', 'posts', 'editor', 'media', 'playful', 'seo', 'marketing',
     'comments', 'users', 'settings', 'publish', 'delete', 'edit-content',
-    'edit-meta', 'approve', 'utm', 'newsletter',
+    'edit-meta', 'approve', 'utm', 'newsletter', 'readers', 'notify',
   ],
   author: [
     'dashboard', 'posts', 'editor', 'media', 'playful', 'comments',
     'edit-content', 'submit', 'approve', 'own-only',
   ],
   seo: ['dashboard', 'posts', 'seo', 'edit-meta'],
-  marketing: ['dashboard', 'playful', 'marketing', 'utm', 'newsletter'],
+  marketing: ['dashboard', 'playful', 'marketing', 'utm', 'newsletter', 'readers', 'notify'],
 };
 
 const ROLES = Object.keys(PERMS);
@@ -76,4 +76,4 @@ function isOwnOnly(req) {
   return req.user && req.user.permissions.includes('own-only');
 }
 
-module.exports = { PERMS, ROLES, permsFor, sign, requireAuth, requirePerm, isOwnOnly };
+module.exports = { PERMS, ROLES, permsFor, jwtSecret, sign, requireAuth, requirePerm, isOwnOnly };

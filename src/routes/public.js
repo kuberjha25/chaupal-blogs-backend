@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const { q } = require('../db');
 const { a, injectToc } = require('../utils');
-const { publicWriteLimiter } = require('../middleware/rateLimit');
+const { publicWriteLimiter, readerCommentLimiter } = require('../middleware/rateLimit');
+const { sameOrigin, loadReader, requireReader } = require('../middleware/reader');
 
 /* Scheduled posts jinke time aa gaya = live */
 const PUB = `(p.status = 'published' OR (p.status = 'scheduled' AND p.scheduled_at <= NOW()))`;
@@ -194,23 +195,59 @@ router.post(
   })
 );
 
-/* ---------------- COMMENT SUBMIT (moderation queue vich jaanda) ---------------- */
+/* ---------------- COMMENTS ---------------- */
+/* Approved comments, purane pehla — sirf naam, initial, body, time. Email kade nahi.
+   Sabton navein 200 lai ke ulta karde haan, taaki limit naal navein comments na kattan. */
+router.get(
+  '/posts/:slug/comments',
+  a(async (req, res) => {
+    const rows = await q(
+      `SELECT c.id, c.author_name, c.body, c.created_at
+       FROM comments c JOIN posts p ON p.id = c.post_id
+       WHERE p.slug = ? AND ${PUB} AND c.status = 'approved'
+       ORDER BY c.created_at DESC, c.id DESC LIMIT 200`,
+      [req.params.slug]
+    );
+    res.json({
+      comments: rows.reverse().map((c) => ({
+        id: c.id,
+        author_name: c.author_name,
+        initial: (Array.from(String(c.author_name || '').trim())[0] || '?').toUpperCase(),
+        body: c.body,
+        created_at: c.created_at,
+      })),
+    });
+  })
+);
+
+/* Submit — sirf logged-in reader; naam reader account ton (body wala naam ignore). Moderation queue vich jaanda. */
 router.post(
   '/posts/:slug/comments',
+  sameOrigin,
   publicWriteLimiter,
+  loadReader,
+  requireReader('Please log in to comment'),
+  readerCommentLimiter,
   a(async (req, res) => {
-    const { name, body } = req.body || {};
-    if (!name || !body) return res.status(400).json({ error: 'Naam te comment dono chahide' });
-    const rows = await q('SELECT id FROM posts WHERE slug = ?', [req.params.slug]);
+    const body = typeof (req.body || {}).body === 'string' ? req.body.body.trim() : '';
+    if (!body) return res.status(400).json({ error: 'Comment is empty' });
+    if (body.length > 1000) return res.status(400).json({ error: 'Comment can be at most 1000 characters' });
+    const rows = await q(`SELECT p.id FROM posts p WHERE p.slug = ? AND ${PUB}`, [req.params.slug]);
     if (!rows[0]) return res.status(404).json({ error: 'Post nahi mila' });
-    await q('INSERT INTO comments (post_id, author_name, body, status) VALUES (?, ?, ?, "pending")', [
-      rows[0].id,
-      String(name).slice(0, 80),
-      String(body).slice(0, 2000),
-    ]);
+    await q(
+      "INSERT INTO comments (post_id, reader_id, author_name, body, status) VALUES (?, ?, ?, ?, 'pending')",
+      [rows[0].id, req.reader.id, req.reader.name, body]
+    );
     res.json({ ok: true, message: 'Comment review queue vich chala gaya' });
   })
 );
+
+/* ---------------- WEB PUSH public key ---------------- */
+router.get('/push/key', (req, res) => {
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  if (!publicKey) return res.status(503).json({ error: 'Push is not configured' });
+  res.json({ publicKey });
+});
 
 /* ---------------- SITEMAP DATA (frontend /sitemap.xml ise use karda) ---------------- */
 router.get(

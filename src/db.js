@@ -17,4 +17,20 @@ async function q(sql, params) {
   return rows;
 }
 
-module.exports = { pool, q };
+/* fn(conn) ik transaction vich; error te rollback. conn.query() [rows, fields] return karda. */
+async function tx(fn) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const out = await fn(conn);
+    await conn.commit();
+    return out;
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+module.exports = { pool, q, tx };
