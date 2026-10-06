@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(100) NOT NULL,
   role ENUM('admin','author','seo','marketing') NOT NULL DEFAULT 'author',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   last_active DATETIME NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

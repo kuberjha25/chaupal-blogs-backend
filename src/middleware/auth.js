@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { q } = require('../db');
 
 /* Same permissions matrix as the approved CMS design.
    Frontend conditional rendering + backend enforcement dono isi se chalte hain. */
@@ -16,8 +17,10 @@ const PERMS = {
   marketing: ['dashboard', 'playful', 'marketing', 'utm', 'newsletter'],
 };
 
+const ROLES = Object.keys(PERMS);
+
 function permsFor(role) {
-  return PERMS[role] || [];
+  return ROLES.includes(role) ? PERMS[role] : [];
 }
 
 /* 'dev-secret' sirf development me. Production me server.js boot pe hi JWT_SECRET verify karta hai. */
@@ -32,16 +35,29 @@ function sign(user) {
   );
 }
 
-function requireAuth(req, res, next) {
+/* Token sirf "kaun hai" dasda hai. Role te is_active har request te DB ton aunde ne,
+   taaki role change / deactivate turant lagu hove (purane token da role nahi manya janda). */
+async function requireAuth(req, res, next) {
+  /* /api/admin te 3 routers mount ne, har ik requireAuth lagaunda — ik request te DB ik vaar */
+  if (req.authLoaded) return next();
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Login required' });
+  let payload;
   try {
-    req.user = jwt.verify(token, jwtSecret());
-    req.user.permissions = permsFor(req.user.role);
-    next();
+    payload = jwt.verify(token, jwtSecret());
   } catch (e) {
     return res.status(401).json({ error: 'Session expired — dubara login karo' });
+  }
+  try {
+    const rows = await q('SELECT id, name, role, is_active FROM users WHERE id = ? LIMIT 1', [payload.id]);
+    const u = rows[0];
+    if (!u || !u.is_active) return res.status(401).json({ error: 'Session expired — dubara login karo' });
+    req.user = { id: u.id, name: u.name, role: u.role, permissions: permsFor(u.role) };
+    req.authLoaded = true;
+    next();
+  } catch (e) {
+    next(e);
   }
 }
 
@@ -60,4 +76,4 @@ function isOwnOnly(req) {
   return req.user && req.user.permissions.includes('own-only');
 }
 
-module.exports = { PERMS, permsFor, sign, requireAuth, requirePerm, isOwnOnly };
+module.exports = { PERMS, ROLES, permsFor, sign, requireAuth, requirePerm, isOwnOnly };

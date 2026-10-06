@@ -10,3 +10,5 @@ node_modules/
 # User uploads (keep the folder placeholder)
 uploads/*
 !uploads/.gitkeep
+
+file.txt

@@ -14,7 +14,8 @@ router.post(
 
     const rows = await q('SELECT * FROM users WHERE email = ? LIMIT 1', [email.toLowerCase().trim()]);
     const user = rows[0];
-    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    /* Inactive user nu bhi same generic error — account di halat leak nahi karni */
+    if (!user || !bcrypt.compareSync(password, user.password_hash) || !user.is_active) {
       return res.status(401).json({ error: 'Email ya password galat hai' });
     }
 

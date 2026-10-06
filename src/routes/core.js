@@ -1,8 +1,8 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
-const { q } = require('../db');
+const { pool, q } = require('../db');
 const { a } = require('../utils');
-const { requireAuth, requirePerm, isOwnOnly, PERMS } = require('../middleware/auth');
+const { requireAuth, requirePerm, isOwnOnly, PERMS, ROLES } = require('../middleware/auth');
 
 router.use(requireAuth);
 
@@ -54,11 +54,57 @@ router.get(
 );
 
 /* ---------------- USERS (admin only) ---------------- */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/* 10+ characters, ghatt ton ghatt ik letter te ik digit.
+   bcrypt 72 bytes ton baad chup-chaap kat dinda hai, isliye upar di limit bhi. */
+function passwordError(pw) {
+  if (typeof pw !== 'string' || !pw) return 'Password chahida';
+  if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw))
+    return 'Password ghatt ton ghatt 10 characters da, ik letter te ik digit naal hona chahida';
+  if (Buffer.byteLength(pw, 'utf8') > 72) return 'Password 72 bytes ton lamba nahi ho sakda';
+  return null;
+}
+
+function cleanName(v) {
+  const name = typeof v === 'string' ? v.trim() : '';
+  return name && name.length <= 80 ? name : null;
+}
+
+function parseActive(v) {
+  if (v === true || v === 1 || v === '1' || v === 'true') return 1;
+  if (v === false || v === 0 || v === '0' || v === 'false') return 0;
+  return null;
+}
+
+/* Saare active admins lock (hamesha ik hi order) — do concurrent demotions dono pass na ho jaan */
+async function lockActiveAdmins(conn) {
+  const [rows] = await conn.query(
+    "SELECT id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
+  );
+  return rows.map((r) => r.id);
+}
+
+async function inTransaction(fn) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const out = await fn(conn);
+    await conn.commit();
+    return out;
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
 router.get(
   '/users',
   requirePerm('users'),
   a(async (req, res) => {
-    const rows = await q('SELECT id, name, email, role, last_active, created_at FROM users ORDER BY id');
+    const rows = await q('SELECT id, name, email, role, is_active, last_active, created_at FROM users ORDER BY id');
     res.json({ users: rows, matrix: PERMS });
   })
 );
@@ -67,34 +113,97 @@ router.post(
   '/users',
   requirePerm('users'),
   a(async (req, res) => {
-    const { name, email, role, password } = req.body || {};
-    if (!name || !email || !PERMS[role]) return res.status(400).json({ error: 'Name, email te valid role chahida' });
-    const hash = bcrypt.hashSync(password || 'Chaupal@123', 10);
-    await q('INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, ?, ?)', [
-      name, email.toLowerCase().trim(), role, hash,
-    ]);
-    res.json({ ok: true, tempPassword: password ? undefined : 'Chaupal@123' });
+    const b = req.body || {};
+    const name = cleanName(b.name);
+    const email = typeof b.email === 'string' ? b.email.toLowerCase().trim() : '';
+    if (!name) return res.status(400).json({ error: 'Name chahida (max 80 characters)' });
+    if (!EMAIL_RE.test(email) || email.length > 120) return res.status(400).json({ error: 'Sahi email chahida' });
+    if (!ROLES.includes(b.role)) return res.status(400).json({ error: `Role ${ROLES.join(', ')} vichon ik hona chahida` });
+    const pwErr = passwordError(b.password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
+
+    const dup = await q('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+    if (dup[0]) return res.status(409).json({ error: 'Is email naal user pehla ton hai' });
+
+    const hash = await bcrypt.hash(b.password, 10);
+    try {
+      const r = await q('INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, ?, ?)', [
+        name, email, b.role, hash,
+      ]);
+      res.json({ ok: true, id: r.insertId });
+    } catch (e) {
+      if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Is email naal user pehla ton hai' });
+      throw e;
+    }
   })
 );
 
-router.patch(
-  '/users/:id',
-  requirePerm('users'),
-  a(async (req, res) => {
-    const { role } = req.body || {};
-    if (!PERMS[role]) return res.status(400).json({ error: 'Valid role chahida' });
-    await q('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
-    res.json({ ok: true });
-  })
-);
+/* name, role, is_active, password — jo bheja ohi badlega. PATCH purane frontend (sirf role) layi. */
+const updateUser = a(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Galat user id' });
+  const b = req.body || {};
+  const set = {};
+
+  if (b.name !== undefined) {
+    const name = cleanName(b.name);
+    if (!name) return res.status(400).json({ error: 'Name chahida (max 80 characters)' });
+    set.name = name;
+  }
+  if (b.role !== undefined) {
+    if (!ROLES.includes(b.role)) return res.status(400).json({ error: `Role ${ROLES.join(', ')} vichon ik hona chahida` });
+    set.role = b.role;
+  }
+  if (b.is_active !== undefined) {
+    const v = parseActive(b.is_active);
+    if (v === null) return res.status(400).json({ error: 'is_active true/false hona chahida' });
+    set.is_active = v;
+  }
+  if (b.password !== undefined) {
+    const pwErr = passwordError(b.password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
+    set.password_hash = await bcrypt.hash(b.password, 10);
+  }
+  const cols = Object.keys(set);
+  if (!cols.length) return res.status(400).json({ error: 'Update karan layi kuchh nahi bheja' });
+
+  const demotes = (set.role !== undefined && set.role !== 'admin') || set.is_active === 0;
+  if (id === req.user.id && demotes)
+    return res.status(400).json({ error: 'Admin apne aap nu demote ya deactivate nahi kar sakda' });
+
+  const result = await inTransaction(async (conn) => {
+    const admins = await lockActiveAdmins(conn);
+    const [rows] = await conn.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [id]);
+    if (!rows[0]) return { status: 404, error: 'User nahi mila' };
+    if (demotes && admins.includes(id) && admins.length <= 1)
+      return { status: 400, error: 'Aakhri active admin nu demote ya deactivate nahi kar sakde' };
+    await conn.query(`UPDATE users SET ${cols.map((c) => `\`${c}\` = ?`).join(', ')} WHERE id = ?`, [
+      ...cols.map((c) => set[c]),
+      id,
+    ]);
+    return null;
+  });
+  if (result) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+});
+
+router.put('/users/:id', requirePerm('users'), updateUser);
+router.patch('/users/:id', requirePerm('users'), updateUser);
 
 router.delete(
   '/users/:id',
   requirePerm('users'),
   a(async (req, res) => {
-    if (Number(req.params.id) === req.user.id)
+    const id = Number(req.params.id);
+    if (id === req.user.id)
       return res.status(400).json({ error: 'Apne aap nu delete nahi kar sakde' });
-    await q('DELETE FROM users WHERE id = ?', [req.params.id]);
+    const blocked = await inTransaction(async (conn) => {
+      const admins = await lockActiveAdmins(conn);
+      if (admins.includes(id) && admins.length <= 1) return true;
+      await conn.query('DELETE FROM users WHERE id = ?', [id]);
+      return false;
+    });
+    if (blocked) return res.status(400).json({ error: 'Aakhri active admin nu delete nahi kar sakde' });
     res.json({ ok: true });
   })
 );

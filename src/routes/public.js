@@ -6,6 +6,9 @@ const { publicWriteLimiter } = require('../middleware/rateLimit');
 /* Scheduled posts jinke time aa gaya = live */
 const PUB = `(p.status = 'published' OR (p.status = 'scheduled' AND p.scheduled_at <= NOW()))`;
 
+/* Newest first. Live ho chuke scheduled posts da published_at NULL hunda, isliye scheduled_at fallback */
+const NEWEST = `ORDER BY COALESCE(p.published_at, p.scheduled_at) DESC, p.id DESC`;
+
 const POST_CARD = `
   SELECT p.id, p.title, p.dek, p.slug, p.read_minutes, p.views, p.ghost_glyph, p.glyph_script, p.art_tone,
          p.published_at, p.is_featured, c.name AS category, c.slug AS category_slug,
@@ -35,11 +38,11 @@ async function getSettings() {
 router.get(
   '/home',
   a(async (req, res) => {
-    const [settings, heroRows, latest, top10, moodsRows, picks, hubs, videos, sessions, calendar, pollRows, quizRows, trending] =
+    const [settings, latest, top10, moodsRows, picks, hubs, videos, sessions, calendar, pollRows, quizRows, trending] =
       await Promise.all([
         getSettings(),
-        q(`${POST_CARD} WHERE ${PUB} AND p.is_featured = 1 ORDER BY p.published_at DESC LIMIT 1`),
-        q(`${POST_CARD} WHERE ${PUB} ORDER BY p.published_at DESC LIMIT 7`),
+        /* Hero + agle 6 (feature 1 + side 3 + row 2) */
+        q(`${POST_CARD} WHERE ${PUB} ${NEWEST} LIMIT 7`),
         q(`SELECT rank_no, title, boli, link, glyph, glyph_script, tone FROM chart_items ORDER BY rank_no ASC`),
         q(`SELECT DISTINCT mood FROM watch_picks ORDER BY mood`),
         q(`SELECT title, why, link, mood, glyph, glyph_script, tone FROM watch_picks ORDER BY id`),
@@ -67,8 +70,9 @@ router.get(
       quiz = { id: quizRows[0].id, title: quizRows[0].title, plays: quizRows[0].plays, ...JSON.parse(quizRows[0].config_json) };
     }
 
-    const hero = heroRows[0] || latest[0] || null;
-    const rest = latest.filter((p) => !hero || p.id !== hero.id);
+    /* Hero hamesha sabton navaan live post (is_featured di parwah nahi) */
+    const hero = latest[0] || null;
+    const rest = latest.slice(1);
 
     res.json({
       settings,
@@ -89,13 +93,32 @@ router.get(
   })
 );
 
+/* ---------------- ARCHIVE (paginated, views count nahi karda) ---------------- */
+router.get(
+  '/posts',
+  a(async (req, res) => {
+    const int = (v, def) => {
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : def;
+    };
+    const limit = Math.min(Math.max(int(req.query.limit, 12), 1), 24);
+    const page = Math.min(Math.max(int(req.query.page, 1), 1), 100000);
+    const [posts, [{ total }]] = await Promise.all([
+      q(`${POST_CARD} WHERE ${PUB} ${NEWEST} LIMIT ? OFFSET ?`, [limit, (page - 1) * limit]),
+      q(`SELECT COUNT(*) AS total FROM posts p WHERE ${PUB}`),
+    ]);
+    res.json({ posts, page, pages: Math.max(1, Math.ceil(total / limit)), total });
+  })
+);
+
 /* ---------------- ARTICLE ---------------- */
 router.get(
   '/posts/:slug',
   a(async (req, res) => {
     const rows = await q(
       `SELECT p.*, c.name AS category, c.slug AS category_slug, b.name AS boli, u.name AS author,
-              m.url_path AS image, m.alt AS image_alt
+              u.name AS author_name, m.url_path AS image, m.alt AS image_alt,
+              m.width AS image_width, m.height AS image_height
        FROM posts p
        LEFT JOIN categories c ON c.id = p.category_id
        LEFT JOIN categories b ON b.id = p.boli_id
@@ -108,7 +131,8 @@ router.get(
     const post = rows[0];
     if (!post) return res.status(404).json({ error: 'Post nahi mila' });
 
-    q('UPDATE posts SET views = views + 1 WHERE id = ?', [post.id]).catch(() => {});
+    /* updated_at = updated_at: view count naal ON UPDATE na chale (sitemap lastmod isi ton) */
+    q('UPDATE posts SET views = views + 1, updated_at = updated_at WHERE id = ?', [post.id]).catch(() => {});
 
     const { html, toc } = injectToc(post.body_html);
     const tags = await q(

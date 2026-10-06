@@ -76,6 +76,38 @@ async function applySchemaIfMissing(conn, log) {
   return true;
 }
 
+/* ---------------- Migrations: idempotent + additive only ----------------
+   schema.sql sirf khali DB te chalda hai, isliye naye columns/tables live DB te
+   ethon aunde ne. Har boot te chalde ne; kuchh missing na hove ta chup. Existing rows nu kade nahi chhedde. */
+async function ensureColumn(conn, table, column, ddl, log) {
+  const [rows] = await conn.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1`,
+    [table, column]
+  );
+  if (rows.length) return false;
+  await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${ddl}`);
+  log(`→ Migration: added column ${table}.${column}`);
+  return true;
+}
+
+async function ensureTable(conn, name, createSql, log) {
+  const [rows] = await conn.query(
+    `SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1`,
+    [name]
+  );
+  if (rows.length) return false;
+  await conn.query(createSql); /* createSql = CREATE TABLE IF NOT EXISTS ... */
+  log(`→ Migration: created table ${name}`);
+  return true;
+}
+
+async function runMigrations(conn, log) {
+  let changed = false;
+  changed = (await ensureColumn(conn, 'users', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1', log)) || changed;
+  return changed;
+}
+
 async function seedIfEmpty(conn, mode, log) {
   const [[{ n }]] = await conn.query('SELECT COUNT(*) AS n FROM users');
   if (n > 0) return false;
@@ -87,7 +119,7 @@ async function seedIfEmpty(conn, mode, log) {
   log(`→ Essential data seeded (admin: ${process.env.ADMIN_EMAIL || 'admin@chaupal.com'}, taxonomy, settings, WP 301s)`);
   if (mode === 'demo') {
     await dummyData(conn);
-    log('→ Dummy demo data seeded (posts, quiz, poll, rails, campaigns, 3 demo users — password Chaupal@123)');
+    log('→ Dummy demo data seeded (posts, quiz, poll, rails, campaigns, 3 demo users)');
   }
   return true;
 }
@@ -101,13 +133,16 @@ async function ensureDatabase({ log = console.log } = {}) {
       /* Sirf verify — DB exist karda te reachable hai */
       await conn.query(`USE \`${DB()}\``);
       log(`→ DB "${DB()}" connected (SEED_MODE=off — no auto-create)`);
+      /* Code in columns te depend karda hai, isliye additive migrations off mode me bhi */
+      await runMigrations(conn, log);
       return { mode, created: false, seeded: false };
     }
     await conn.query(`CREATE DATABASE IF NOT EXISTS \`${DB()}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     await conn.query(`USE \`${DB()}\``);
     const created = await applySchemaIfMissing(conn, log);
+    const migrated = await runMigrations(conn, log);
     const seeded = await seedIfEmpty(conn, mode, log);
-    if (!created && !seeded) log(`→ DB "${DB()}" ready (pehla ton seeded — kuchh nahi badleya)`);
+    if (!created && !migrated && !seeded) log(`→ DB "${DB()}" ready (pehla ton seeded — kuchh nahi badleya)`);
     return { mode, created, seeded };
   } finally {
     await conn.end();
@@ -133,4 +168,4 @@ async function resetDatabase(mode, { log = console.log } = {}) {
   }
 }
 
-module.exports = { ensureDatabase, resetDatabase, seedMode };
+module.exports = { ensureDatabase, resetDatabase, seedMode, ensureColumn, ensureTable };

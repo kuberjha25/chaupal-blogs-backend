@@ -24,13 +24,13 @@ resetDatabase(mode)
   .then(() => {
     console.log('');
     if (mode === 'demo') {
-      console.log('Logins (password sab da: Chaupal@123):');
+      console.log('Demo logins (password: database/data.js vich demo default):');
       console.log('  admin@chaupal.com      → Admin');
       console.log('  desk@chaupal.com       → Publisher (Author)');
       console.log('  seo@chaupal.com        → SEO Manager');
       console.log('  marketing@chaupal.com  → Marketing Agent');
     } else {
-      console.log(`Admin login: ${process.env.ADMIN_EMAIL || 'admin@chaupal.com'} / ${process.env.ADMIN_PASSWORD ? '(ADMIN_PASSWORD env wala)' : 'Chaupal@123 — PROD te .env vich ADMIN_PASSWORD zaroor set karo!'}`);
+      console.log(`Admin login: ${process.env.ADMIN_EMAIL || 'admin@chaupal.com'} / ${process.env.ADMIN_PASSWORD ? '(ADMIN_PASSWORD env wala)' : '(demo default — PROD te .env vich ADMIN_PASSWORD zaroor set karo!)'}`);
     }
     process.exit(0);
   })
