@@ -73,7 +73,11 @@ const { ensureDatabase, seedMode } = require('./database/bootstrap');
   }
   /* Email config galat hove ta server fir bhi chalda; sirf reader signup/forgot 503 */
   const mail = require('./src/mailer').status();
-  if (!mail.ok) console.warn(`→ Reader email disabled: ${mail.reason} (signup/forgot return 503)`);
+  if (!mail.configured)
+    console.warn(
+      `→ Reader email disabled (EMAIL_MODE=${mail.mode || 'unset'}): ${mail.reason}. Signup/forgot return 503.`
+    );
+  else console.log(`→ Reader email: ${mail.mode}`);
   if (!process.env.VAPID_PUBLIC_KEY) console.warn('→ Web push disabled: VAPID_* env not set (npm run vapid)');
   app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
     console.log(`Chaupal Te Charcha API chal rahi hai → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);

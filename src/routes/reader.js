@@ -53,11 +53,13 @@ const dummy = () => dummyHash || (dummyHash = bcrypt.hashSync('timing-dummy-pass
 
 const publicReader = (r) => ({ id: r.id, name: r.name, notif_status: r.notif_status });
 
-/* Response ton baad chalan wala kam. Error log ch email/SQL message nahi (SES / dup-key messages vich email hundi). */
+/* Response ton baad chalan wala kam. Error log ch email/SQL message nahi (SES / dup-key messages vich email hundi).
+   Client nu pehla hi generic jawab mil chukka — fail hove ta bhi email enumeration nahi. */
 function background(label, fn) {
   Promise.resolve()
     .then(fn)
     .catch((e) => {
+      if (e && e.logged) return; /* mailer ne "[mail] send failed: ..." pehla hi likh ditta */
       const detail = e && e.name === 'MailConfigError' ? e.message : (e && (e.code || e.name)) || 'error';
       console.error(`[reader] ${label} failed: ${detail}`);
     });
@@ -128,7 +130,7 @@ router.post(
   '/signup/start',
   otpIpLimiter,
   a(async (req, res) => {
-    if (!mailer.status().ok) return mailNotReady(res);
+    if (!mailer.status().configured) return mailNotReady(res);
     const b = req.body || {};
     const name = cleanName(b.name);
     const email = cleanEmail(b.email);
@@ -222,7 +224,7 @@ router.post(
   '/password/forgot',
   otpIpLimiter,
   a(async (req, res) => {
-    if (!mailer.status().ok) return mailNotReady(res);
+    if (!mailer.status().configured) return mailNotReady(res);
     const email = cleanEmail((req.body || {}).email);
     if (!email) return res.status(400).json({ error: 'Please enter a valid email' });
     const ip = req.ip;
