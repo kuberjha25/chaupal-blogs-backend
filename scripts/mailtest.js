@@ -18,7 +18,7 @@ const st = mailer.status();
 if (st.mode === 'log') fail('EMAIL_MODE is "log" (or unset) — nothing would be sent. Set EMAIL_MODE=smtp or ses.');
 if (!st.configured) fail(`email is not configured (EMAIL_MODE=${st.mode || 'unset'}): ${st.reason}`);
 
-console.log(`Sending a test email (EMAIL_MODE=${st.mode})...`);
+console.log(`Sending a test email (EMAIL_MODE=${st.mode}${st.mode === 'smtp' ? `, HELO=${st.helo}` : ''})...`);
 const started = Date.now();
 mailer
   .sendMail({

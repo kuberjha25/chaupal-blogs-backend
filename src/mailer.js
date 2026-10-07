@@ -42,7 +42,9 @@ function smtpConfig() {
   if (!user) missing.push('SMTP_USER');
   if (!pass || pass === 'CHANGE_ME') missing.push('SMTP_PASS');
   if (!fromAddress(from)) missing.push('EMAIL_FROM');
-  return { missing, host, port, secure, user, pass, from, replyTo: env('EMAIL_REPLY_TO') };
+  /* EHLO naam: SMTP_HELO_NAME, nahi ta EMAIL_FROM da domain (default "[127.0.0.1]" kai servers reject karde, e.g. Rediffmail "550 Invalid HeloHost") */
+  const heloName = env('SMTP_HELO_NAME') || (fromAddress(from) || '').split('@')[1] || '';
+  return { missing, host, port, secure, user, pass, from, heloName, replyTo: env('EMAIL_REPLY_TO') };
 }
 
 /* {mode, configured, missing:[names], reason} — reason vich sirf names, values kade nahi */
@@ -56,8 +58,8 @@ function status() {
     return out(mode, []);
   }
   if (mode === 'smtp') {
-    const { missing } = smtpConfig();
-    return out(mode, missing, missing.length ? `missing or invalid: ${missing.join(', ')}` : null);
+    const { missing, heloName } = smtpConfig();
+    return { ...out(mode, missing, missing.length ? `missing or invalid: ${missing.join(', ')}` : null), helo: heloName || null };
   }
   if (mode === 'ses') {
     if (!process.env.EMAIL_FROM) return out(mode, ['EMAIL_FROM'], 'EMAIL_FROM is not set');
@@ -112,7 +114,7 @@ let smtp = { key: null, transport: null };
 function smtpTransport(cfg) {
   const key = crypto
     .createHash('sha256')
-    .update(JSON.stringify([cfg.host, cfg.port, cfg.secure, cfg.user, cfg.pass]))
+    .update(JSON.stringify([cfg.host, cfg.port, cfg.secure, cfg.user, cfg.pass, cfg.heloName]))
     .digest('hex');
   if (smtp.transport && smtp.key === key) return smtp.transport;
   if (smtp.transport) smtp.transport.close();
@@ -124,6 +126,7 @@ function smtpTransport(cfg) {
       maxConnections: 2,
       host: cfg.host,
       port: cfg.port,
+      name: cfg.heloName, /* EHLO greeting */
       secure: cfg.secure, /* true = implicit TLS (465) */
       requireTLS: !cfg.secure, /* baaki sab: STARTTLS zaroori, plain-text te kade nahi bhejna */
       auth: { user: cfg.user, pass: cfg.pass },
