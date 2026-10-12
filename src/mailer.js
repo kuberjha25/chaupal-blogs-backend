@@ -1,10 +1,10 @@
 /* Mail — EMAIL_MODE env:
-     log  → stdout te "[DEV MAIL] ..." (production vich sirf ALLOW_OTP_LOG=yes naal)
-     smtp → nodemailer, ik pooled transport (SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS)
+     log  → "[DEV MAIL] ..." on stdout (in production only with ALLOW_OTP_LOG=yes)
+     smtp → nodemailer, one pooled transport (SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS)
      ses  → AWS SES v2 (region AWS_REGION, From EMAIL_FROM, credentials default chain / instance role)
-   Dev vich EMAIL_MODE khali = log. Production vich khali/galat = status().configured false →
-   reader signup/forgot 503 dinde ne, baaki server chalda rehnda.
-   Env har call te padhe jaande ne; values (khaas kar SMTP_PASS) kade log nahi hundiyan — sirf variable NAMES. */
+   In dev an empty EMAIL_MODE = log. In production empty/invalid = status().configured false →
+   reader signup/forgot return 503, the rest of the server keeps running.
+   Env is read on every call; values (especially SMTP_PASS) are never logged — only variable NAMES. */
 
 const crypto = require('crypto');
 
@@ -26,13 +26,13 @@ function fromAddress(from) {
   return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(addr) ? addr : null;
 }
 
-/* SMTP config ya missing/invalid variable NAMES */
+/* SMTP config, or the missing/invalid variable NAMES */
 function smtpConfig() {
   const missing = [];
   const host = env('SMTP_HOST');
   const secure = env('SMTP_SECURE').toLowerCase() === 'true';
   const portRaw = env('SMTP_PORT');
-  /* SMTP_SECURE=true te port na ditta hove ta 465 (implicit TLS), nahi ta 587 (STARTTLS) */
+  /* With SMTP_SECURE=true and no port given: 465 (implicit TLS); otherwise 587 (STARTTLS) */
   const port = portRaw ? Number(portRaw) : secure ? 465 : 587;
   const user = env('SMTP_USER');
   const pass = process.env.SMTP_PASS || '';
@@ -42,12 +42,12 @@ function smtpConfig() {
   if (!user) missing.push('SMTP_USER');
   if (!pass || pass === 'CHANGE_ME') missing.push('SMTP_PASS');
   if (!fromAddress(from)) missing.push('EMAIL_FROM');
-  /* EHLO naam: SMTP_HELO_NAME, nahi ta EMAIL_FROM da domain (default "[127.0.0.1]" kai servers reject karde, e.g. Rediffmail "550 Invalid HeloHost") */
+  /* EHLO name: SMTP_HELO_NAME, else the domain of EMAIL_FROM (some servers reject the default "[127.0.0.1]", e.g. Rediffmail "550 Invalid HeloHost") */
   const heloName = env('SMTP_HELO_NAME') || (fromAddress(from) || '').split('@')[1] || '';
   return { missing, host, port, secure, user, pass, from, heloName, replyTo: env('EMAIL_REPLY_TO') };
 }
 
-/* {mode, configured, missing:[names], reason} — reason vich sirf names, values kade nahi */
+/* {mode, configured, missing:[names], reason} — reason holds only names, never values */
 function status() {
   const mode = rawMode();
   const out = (m, missing, reason) => ({ mode: m, configured: !missing.length, missing, reason: reason || null });
@@ -68,8 +68,8 @@ function status() {
   return out(mode, ['EMAIL_MODE'], `EMAIL_MODE "${mode}" is unknown (use log, smtp or ses)`);
 }
 
-/* Error da ik safe hissa: nodemailer code (+ SMTP response code), nahi ta message —
-   us vich koi email address / username / password na rahe */
+/* A safe part of the error: the nodemailer code (+ SMTP response code), else the message —
+   with any email address / username / password stripped out */
 function safeDetail(e) {
   if (e && e.code) return `${e.code}${e.responseCode ? ` ${e.responseCode}` : ''}`;
   let msg = String((e && (e.message || e.name)) || 'error');
@@ -108,7 +108,7 @@ async function sendSes({ to, subject, text, html }) {
 }
 
 /* ---------------- SMTP ---------------- */
-/* Ik lazy pooled transport. Config badle (env call time te padhda) ta purana band, naya bane. */
+/* One lazy pooled transport. If the config changes (env is read at call time) the old one is closed and a new one created. */
 let smtp = { key: null, transport: null };
 
 function smtpTransport(cfg) {
@@ -128,7 +128,7 @@ function smtpTransport(cfg) {
       port: cfg.port,
       name: cfg.heloName, /* EHLO greeting */
       secure: cfg.secure, /* true = implicit TLS (465) */
-      requireTLS: !cfg.secure, /* baaki sab: STARTTLS zaroori, plain-text te kade nahi bhejna */
+      requireTLS: !cfg.secure, /* everything else: STARTTLS required, never send over plain text */
       auth: { user: cfg.user, pass: cfg.pass },
       connectionTimeout: 10000,
       greetingTimeout: 10000,
@@ -161,7 +161,7 @@ async function sendSmtp({ to, subject, text, html }) {
   }
 }
 
-/* mailtest / graceful shutdown: pool band karo taaki process exit ho sake */
+/* mailtest / graceful shutdown: close the pool so the process can exit */
 function closeMail() {
   if (smtp.transport) smtp.transport.close();
   smtp = { key: null, transport: null };

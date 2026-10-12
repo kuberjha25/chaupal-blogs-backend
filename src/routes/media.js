@@ -10,7 +10,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (/^image\//.test(file.mimetype)) cb(null, true);
-    else cb(new Error('Sirf image files upload ho sakdiyan'));
+    else cb(new Error('Only image files can be uploaded'));
   },
 });
 
@@ -28,12 +28,12 @@ router.get(
   })
 );
 
-/* Koi bhi image aaye — JPG/PNG/GIF — save hamesha WebP hi hovega */
+/* Whatever image comes in — JPG/PNG/GIF — it is always saved as WebP */
 router.post(
   '/',
   upload.single('file'),
   a(async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'File nahi mili (field name: file)' });
+    if (!req.file) return res.status(400).json({ error: 'No file received (field name: file)' });
     const saved = await storage.save(req.file.buffer, req.file.originalname);
     const r = await q(
       `INSERT INTO media (filename, original_name, url_path, mime, width, height, size_bytes, alt, uploaded_by)

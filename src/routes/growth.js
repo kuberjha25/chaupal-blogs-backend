@@ -33,7 +33,7 @@ router.post(
   requirePerm('edit-meta'),
   a(async (req, res) => {
     const { from_path, to_path, code } = req.body || {};
-    if (!from_path || !to_path) return res.status(400).json({ error: 'from_path te to_path dono chahide' });
+    if (!from_path || !to_path) return res.status(400).json({ error: 'from_path and to_path are both required' });
     await q('INSERT INTO redirects (from_path, to_path, code) VALUES (?, ?, ?)', [
       from_path.startsWith('/') ? from_path : `/${from_path}`,
       to_path,
@@ -77,7 +77,7 @@ router.post(
   requirePerm('utm'),
   a(async (req, res) => {
     const b = req.body || {};
-    if (!b.name) return res.status(400).json({ error: 'Campaign da naam chahida' });
+    if (!b.name) return res.status(400).json({ error: 'Campaign name is required' });
     await q(
       `INSERT INTO campaigns (name, channel, base_url, utm_source, utm_medium, utm_campaign, status)
        VALUES (?, ?, ?, ?, ?, ?, 'live')`,
@@ -97,12 +97,12 @@ router.patch(
   })
 );
 
-/* Demo: real mailer (SES/Mailchimp) production phase vich wire hovega */
+/* Demo: the real mailer (SES/Mailchimp) will be wired up in the production phase */
 router.post(
   '/marketing/newsletter/test',
   requirePerm('newsletter'),
   a(async (req, res) => {
-    res.json({ ok: true, message: 'Test send queued (demo) — mailer production vich wire hovega' });
+    res.json({ ok: true, message: 'Test send queued (demo) — the mailer will be wired up in production' });
   })
 );
 

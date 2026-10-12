@@ -1,6 +1,6 @@
 /* npm run mailtest -- you@example.com
-   Configured EMAIL_MODE (smtp / ses) naal ik test email bhejda hai. "log" mode vich mana.
-   Kade koi secret print nahi karda — sirf mode, variable NAMES, te error code. */
+   Sends one test email with the configured EMAIL_MODE (smtp / ses). Refused in "log" mode.
+   Never prints any secret — only the mode, variable NAMES and the error code. */
 require('dotenv').config();
 const mailer = require('../src/mailer');
 const { EMAIL_RE } = require('../src/utils');

@@ -8,7 +8,7 @@ router.use(requireAuth, requirePerm('posts,edit-content,edit-meta'));
 async function uniqueSlug(base, ignoreId) {
   let s = slugify(base);
   let n = 1;
-  /* jab tak same slug milta rahe, suffix badhao */
+  /* keep bumping the suffix while the same slug exists */
   while (true) {
     const rows = await q('SELECT id FROM posts WHERE slug = ? AND id != ? LIMIT 1', [s, ignoreId || 0]);
     if (!rows.length) return s;
@@ -56,7 +56,7 @@ router.get(
       [req.params.id]
     );
     const post = rows[0];
-    if (!post) return res.status(404).json({ error: 'Post nahi mila' });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
       if (isOwnOnly(req) && post.author_id !== req.user.id)
         return res.status(403).json({ error: 'This post does not belong to you' });
     const tags = await q(
@@ -84,7 +84,7 @@ async function saveTags(postId, tagsCsv) {
 function pickStatus(req, wanted) {
   const can = req.user.permissions;
   if ((wanted === 'published' || wanted === 'scheduled') && !can.includes('publish')) {
-    /* Publisher publish nahi kar sakda — review vich jaanda hai */
+    /* A Publisher cannot publish — it goes to review */
     return 'review';
   }
   return ['draft', 'review', 'scheduled', 'published'].includes(wanted) ? wanted : 'draft';
@@ -126,9 +126,9 @@ router.put(
   a(async (req, res) => {
     const rows = await q('SELECT * FROM posts WHERE id = ?', [req.params.id]);
     const post = rows[0];
-    if (!post) return res.status(404).json({ error: 'Post nahi mila' });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
     if (isOwnOnly(req) && post.author_id !== req.user.id)
-      return res.status(403).json({ error: 'Eh post tuhada nahi hai' });
+      return res.status(403).json({ error: 'This post does not belong to you' });
 
     const b = req.body || {};
     const canContent = req.user.permissions.includes('edit-content');

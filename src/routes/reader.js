@@ -1,6 +1,6 @@
-/* /api/reader — site de paathak (readers). Staff (users table, JWT, roles) ton bilkul alag.
-   Har write: sameOrigin (X-CTC + JSON + Origin) + rate limits. Email registered hai ya nahi, eh kade leak nahi karna:
-   signup/start te password/forgot same jawab dinde ne, te lookup + code + mail response ton BAAD background ch hunde ne. */
+/* /api/reader — site visitors (readers). Completely separate from staff (users table, JWT, roles).
+   Every write: sameOrigin (X-CTC + JSON + Origin) + rate limits. Never leak whether an email is registered:
+   signup/start and password/forgot return the same answer, and lookup + code + mail happen in the background AFTER the response. */
 const router = require('express').Router();
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
@@ -30,7 +30,7 @@ const cleanEmail = (v) => {
   return EMAIL_RE.test(e) && e.length <= 120 ? e : null;
 };
 
-/* Control characters te < > hata ke, 2-60 characters */
+/* Strip control characters and < >, then 2-60 characters */
 const cleanName = (v) => {
   const n = typeof v === 'string' ? v.replace(/[\u0000-\u001F\u007F-\u009F<>]/g, '').trim() : '';
   const len = Array.from(n).length;
@@ -47,19 +47,19 @@ function passwordError(pw) {
 
 const isCode = (v) => typeof v === 'string' && /^\d{6}$/.test(v);
 
-/* User-not-found te bhi bcrypt chale, taaki login timing ton email da pata na lagge */
+/* Run bcrypt even when the user is not found, so login timing doesn't reveal the email */
 let dummyHash;
 const dummy = () => dummyHash || (dummyHash = bcrypt.hashSync('timing-dummy-password-1', BCRYPT_COST));
 
 const publicReader = (r) => ({ id: r.id, name: r.name, notif_status: r.notif_status });
 
-/* Response ton baad chalan wala kam. Error log ch email/SQL message nahi (SES / dup-key messages vich email hundi).
-   Client nu pehla hi generic jawab mil chukka — fail hove ta bhi email enumeration nahi. */
+/* Work that runs after the response. No email/SQL message in the error log (SES / dup-key messages contain the email).
+   The client already got the generic answer — even on failure there is no email enumeration. */
 function background(label, fn) {
   Promise.resolve()
     .then(fn)
     .catch((e) => {
-      if (e && e.logged) return; /* mailer ne "[mail] send failed: ..." pehla hi likh ditta */
+      if (e && e.logged) return; /* mailer already logged "[mail] send failed: ..." */
       const detail = e && e.name === 'MailConfigError' ? e.message : (e && (e.code || e.name)) || 'error';
       console.error(`[reader] ${label} failed: ${detail}`);
     });
@@ -69,8 +69,8 @@ function background(label, fn) {
 const otpHash = (purpose, email, code) =>
   crypto.createHmac('sha256', jwtSecret()).update(`${purpose}:${email}:${code}`).digest('hex');
 
-/* Naya code: 60s cooldown, 5 per email per hour. Limit lagge ta chup-chaap kuchh nahi (429 email da status leak karda).
-   Reader row lock karke — do parallel requests limits paar na kar sakan. Pehle wale codes invalid. */
+/* New code: 60s cooldown, 5 per email per hour. When a limit hits, silently do nothing (a 429 would leak the email's status).
+   Locks the reader row — so two parallel requests can't get past the limits. Earlier codes become invalid. */
 async function issueOtp(email, purpose, ip) {
   const code = await tx(async (conn) => {
     const [locked] = await conn.query('SELECT id FROM readers WHERE email = ? FOR UPDATE', [email]);
@@ -99,7 +99,7 @@ async function issueOtp(email, purpose, ip) {
   await mailer.sendMail({ to: email, ...mailer.otpEmail(code, purpose) });
 }
 
-/* Single use, 10 min, 5 galat attempts te code khatam */
+/* Single use, 10 min; the code is dead after 5 wrong attempts */
 async function consumeOtp(email, purpose, code) {
   return tx(async (conn) => {
     const [rows] = await conn.query(
@@ -144,7 +144,7 @@ router.post(
     res.json({ ok: true, message: SIGNUP_MSG });
 
     background('signup', async () => {
-      /* Verified row nu kade nahi badalna; unverified row nu naya name/password */
+      /* Never change a verified row; an unverified row gets the new name/password */
       await q(
         `INSERT INTO readers (name, email, password_hash) VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE
@@ -216,7 +216,7 @@ router.post(
   })
 );
 
-/* Kade 401 nahi — logged-out pages console errors na dikhaun */
+/* Never 401 — so logged-out pages don't show console errors */
 router.get('/me', loadReader, (req, res) => res.json({ reader: req.reader || null }));
 
 /* ---------------- PASSWORD ---------------- */
@@ -246,9 +246,9 @@ router.post(
     const b = req.body || {};
     const email = cleanEmail(b.email);
     if (!email || !isCode(b.code)) return res.status(400).json({ error: BAD_CODE });
-    /* "password" alias bhi chalda; dono hon ta new_password */
+    /* The "password" alias also works; if both are sent, new_password wins */
     const newPassword = b.new_password !== undefined ? b.new_password : b.password;
-    /* Password pehla check — galat password te code zaya na hove */
+    /* Check the password first — so an invalid password doesn't waste the code */
     const pwErr = passwordError(newPassword);
     if (pwErr) return res.status(400).json({ error: pwErr });
     if (!(await consumeOtp(email, 'reset', b.code))) return res.status(400).json({ error: BAD_CODE });
@@ -260,7 +260,7 @@ router.post(
     const r = rows[0];
     if (!r) return res.status(400).json({ error: BAD_CODE });
     const hash = await bcrypt.hash(newPassword, BCRYPT_COST);
-    /* Password badle ta saare purane sessions khatam, phir ik naya */
+    /* On a password change, end all old sessions, then create one new one */
     await tx(async (conn) => {
       await conn.query('UPDATE readers SET password_hash = ?, last_login_at = NOW() WHERE id = ?', [hash, r.id]);
       await conn.query('DELETE FROM reader_sessions WHERE reader_id = ?', [r.id]);
@@ -282,7 +282,7 @@ router.post(
     if (!r || !(await bcrypt.compare(password, r.password_hash)))
       return res.status(400).json({ error: 'Wrong password' });
 
-    /* Comments rehnde ne, par naam "Deleted reader". Sessions + push subscriptions FK CASCADE naal jaande ne. */
+    /* Comments stay, but under the name "Deleted reader". Sessions + push subscriptions go via FK CASCADE. */
     await tx(async (conn) => {
       await conn.query(
         "UPDATE comments SET reader_id = NULL, author_name = 'Deleted reader' WHERE reader_id = ?",
@@ -297,7 +297,7 @@ router.post(
 );
 
 /* ---------------- WEB PUSH ---------------- */
-/* Sirf asli browser push services — warna server kisi bhi URL te POST karega (SSRF, e.g. cloud metadata) */
+/* Real browser push services only — otherwise the server would POST to any URL (SSRF, e.g. cloud metadata) */
 const PUSH_HOSTS = [
   'fcm.googleapis.com',
   'android.googleapis.com',
@@ -341,7 +341,7 @@ router.post(
          auth = VALUES(auth), user_agent = VALUES(user_agent), failed_count = 0`,
       [id, sha256(endpoint), endpoint, keys.p256dh, keys.auth, String(req.get('user-agent') || '').slice(0, 200)]
     );
-    /* Ik reader de bahut saare devices — sirf navein 10 rakho */
+    /* One reader with many devices — keep only the newest 10 */
     await q(
       `DELETE FROM push_subscriptions WHERE reader_id = ? AND id NOT IN (
          SELECT id FROM (SELECT id FROM push_subscriptions WHERE reader_id = ? ORDER BY id DESC LIMIT ${MAX_SUBS_PER_READER}) keep

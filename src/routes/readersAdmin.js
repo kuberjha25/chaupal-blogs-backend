@@ -18,7 +18,7 @@ router.get(
     };
     const limit = Math.min(Math.max(int(req.query.limit, 25), 1), 100);
     const page = Math.min(Math.max(int(req.query.page, 1), 1), 100000);
-    /* "q" = "search" da alias */
+    /* "q" is an alias for "search" */
     const search = String(req.query.search || req.query.q || '').trim().slice(0, 120);
 
     let where = '1=1';
@@ -54,27 +54,27 @@ router.get(
   })
 );
 
-/* Admin only: "readers" + "users" (users permission sirf admin kol) */
+/* Admin only: "readers" + "users" (only admin has the users permission) */
 router.patch(
   '/readers/:id',
   requirePerm('readers'),
   requirePerm('users'),
   a(async (req, res) => {
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Galat reader id' });
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid reader id' });
     const active = parseActive((req.body || {}).is_active);
-    if (active === null) return res.status(400).json({ error: 'is_active true/false hona chahida' });
+    if (active === null) return res.status(400).json({ error: 'is_active must be true/false' });
     const r = await q('UPDATE readers SET is_active = ? WHERE id = ?', [active, id]);
-    if (!r.affectedRows) return res.status(404).json({ error: 'Reader nahi mila' });
-    /* Inactive → saare sessions khatam, turant logout */
+    if (!r.affectedRows) return res.status(404).json({ error: 'Reader not found' });
+    /* Inactive → end all sessions, immediate logout */
     if (!active) await q('DELETE FROM reader_sessions WHERE reader_id = ?', [id]);
     res.json({ ok: true });
   })
 );
 
 /* ---------------- NOTIFICATIONS ---------------- */
-/* Teeno env hon te web-push unhan nu valid manne (subject mailto:/https:, key format) — nahi ta null.
-   Galat key naal har subscription "failed" gin hundi, isliye pehla hi rok do. */
+/* All three env vars must be set and web-push must accept them as valid (subject mailto:/https:, key format) — otherwise null.
+   With a bad key every subscription would count as "failed", so stop up front. */
 const vapid = () => {
   const { VAPID_PUBLIC_KEY: publicKey, VAPID_PRIVATE_KEY: privateKey, VAPID_SUBJECT: subject } = process.env;
   if (!publicKey || !privateKey || !subject) return null;
@@ -87,7 +87,7 @@ const vapid = () => {
   return { publicKey, privateKey, subject };
 };
 
-/* "/..." (par "//host" nahi) ya SITE_URL wale origin da https/http link */
+/* "/..." (but not "//host") or an https/http link on the SITE_URL origin */
 function cleanUrl(v) {
   if (typeof v !== 'string') return null;
   const url = v.trim();
@@ -105,7 +105,7 @@ function cleanUrl(v) {
 const SEND_CONCURRENCY = 10;
 const TTL_SECONDS = 24 * 60 * 60;
 
-/* Ik subscription te bhejo; 404/410 = browser ne subscription khatam kar ditti → delete */
+/* Send to one subscription; 404/410 = the browser ended the subscription → delete */
 async function sendOne(sub, payload, details) {
   try {
     await webpush.sendNotification(
@@ -133,15 +133,15 @@ router.post(
     if (!keys) return res.status(503).json({ error: 'Push is not configured' });
     const b = req.body || {};
     const title = typeof b.title === 'string' ? b.title.trim() : '';
-    /* "message" = "body" da alias; dono hon ta body */
+    /* "message" is an alias for "body"; if both are sent, body wins */
     const rawBody = b.body !== undefined ? b.body : b.message;
     const body = typeof rawBody === 'string' ? rawBody.trim() : '';
     const url = cleanUrl(b.url);
     const audience = b.audience === undefined || b.audience === null || b.audience === '' ? 'all_granted' : b.audience;
-    if (!title || title.length > 65) return res.status(400).json({ error: 'Title 1 to 65 characters hona chahida' });
-    if (!body || body.length > 150) return res.status(400).json({ error: 'Body 1 to 150 characters hona chahida' });
-    if (!url) return res.status(400).json({ error: 'URL "/" ton shuru hove ya SITE_URL te hove' });
-    if (audience !== 'all_granted') return res.status(400).json({ error: 'Audience all_granted hona chahida' });
+    if (!title || title.length > 65) return res.status(400).json({ error: 'Title must be 1 to 65 characters' });
+    if (!body || body.length > 150) return res.status(400).json({ error: 'Body must be 1 to 150 characters' });
+    if (!url) return res.status(400).json({ error: 'URL must start with "/" or be on SITE_URL' });
+    if (audience !== 'all_granted') return res.status(400).json({ error: 'Audience must be all_granted' });
 
     const subs = await q(
       `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
@@ -151,7 +151,7 @@ router.post(
     const payload = JSON.stringify({ title, body, url });
     const details = { subject: keys.subject, publicKey: keys.publicKey, privateKey: keys.privateKey };
 
-    /* 10 workers, ik queue */
+    /* 10 workers, one queue */
     let next = 0;
     let sent = 0;
     let failed = 0;
@@ -184,7 +184,7 @@ router.get(
          FROM notifications n LEFT JOIN users u ON u.id = n.created_by
          ORDER BY n.id DESC LIMIT 50`
       ),
-      /* Kinne readers tak abhi bhej sakde haan: active + granted + ghatt ton ghatt ik subscription */
+      /* How many readers we can reach right now: active + granted + at least one subscription */
       q(
         `SELECT COUNT(*) AS granted FROM readers r
          WHERE r.is_active = 1 AND r.notif_status = 'granted'

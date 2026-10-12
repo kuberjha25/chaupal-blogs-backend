@@ -1,5 +1,5 @@
-/* Reader (site paathak) sessions — staff JWT ton bilkul alag.
-   Cookie "ctc_reader" vich random 32-byte token; DB vich sirf us da SHA-256. 30 din sliding. */
+/* Reader (site visitor) sessions — completely separate from the staff JWT.
+   Cookie "ctc_reader" holds a random 32-byte token; the DB stores only its SHA-256. 30 days, sliding. */
 const crypto = require('crypto');
 const { q } = require('../db');
 
@@ -29,7 +29,7 @@ function clearSessionCookie(req, res) {
   res.clearCookie(COOKIE, cookieOpts(req));
 }
 
-/* conn diya hove ta transaction vich (password reset), nahi ta pool */
+/* If conn is given, runs inside that transaction (password reset); otherwise uses the pool */
 async function createSession(req, res, readerId, conn) {
   const run = conn ? (sql, p) => conn.query(sql, p) : (sql, p) => q(sql, p);
   const token = crypto.randomBytes(32).toString('base64url');
@@ -42,7 +42,7 @@ async function createSession(req, res, readerId, conn) {
   setSessionCookie(req, res, token);
 }
 
-/* req.reader = {id, name, notif_status} ya null. Kade 401 nahi dinda. */
+/* req.reader = {id, name, notif_status} or null. Never returns 401. */
 async function loadReader(req, res, next) {
   req.reader = null;
   const token = readCookie(req, COOKIE);
@@ -67,7 +67,7 @@ async function loadReader(req, res, next) {
     }
     req.reader = { id: r.id, name: r.name, notif_status: r.notif_status };
     req.readerSessionId = r.session_id;
-    /* Sliding expiry — har request te nahi, ghante ch ik vaar */
+    /* Sliding expiry — not on every request, once an hour */
     if (Number(r.stale)) {
       await q(
         `UPDATE reader_sessions SET last_seen_at = NOW(), expires_at = NOW() + INTERVAL ${SESSION_DAYS} DAY WHERE id = ?`,
@@ -81,12 +81,12 @@ async function loadReader(req, res, next) {
   }
 }
 
-/* loadReader ton baad */
+/* Use after loadReader */
 const requireReader = (message = 'Please log in') => (req, res, next) =>
   req.reader ? next() : res.status(401).json({ error: message });
 
-/* CSRF guard har POST/PUT/PATCH/DELETE te: custom header "X-CTC: 1" (cross-site ton
-   preflight bina nahi aa sakda), JSON content-type, te Origin (je hai) da host = request Host. */
+/* CSRF guard on every POST/PUT/PATCH/DELETE: custom header "X-CTC: 1" (cannot be sent cross-site
+   without a preflight), JSON content-type, and the Origin host (if present) = request Host. */
 function sameOrigin(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
   const forbidden = () => res.status(403).json({ error: 'Forbidden' });
@@ -100,7 +100,7 @@ function sameOrigin(req, res, next) {
     } catch (e) {
       return forbidden();
     }
-    /* trust proxy on hai: nginx / Next proxy original host X-Forwarded-Host vich bhejde ne */
+    /* trust proxy is on: nginx / the Next proxy send the original host in X-Forwarded-Host */
     const allowed = [req.get('host'), ...String(req.get('x-forwarded-host') || '').split(',')]
       .map((h) => String(h || '').trim().toLowerCase())
       .filter(Boolean);

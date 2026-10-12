@@ -54,13 +54,13 @@ router.get(
 );
 
 /* ---------------- USERS (admin only) ---------------- */
-/* 10+ characters, ghatt ton ghatt ik letter te ik digit.
-   bcrypt 72 bytes ton baad chup-chaap kat dinda hai, isliye upar di limit bhi. */
+/* 10+ characters, at least one letter and one digit.
+   bcrypt silently truncates after 72 bytes, hence the upper limit too. */
 function passwordError(pw) {
-  if (typeof pw !== 'string' || !pw) return 'Password chahida';
+  if (typeof pw !== 'string' || !pw) return 'Password is required';
   if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw))
-    return 'Password ghatt ton ghatt 10 characters da, ik letter te ik digit naal hona chahida';
-  if (Buffer.byteLength(pw, 'utf8') > 72) return 'Password 72 bytes ton lamba nahi ho sakda';
+    return 'Password must be at least 10 characters with at least one letter and one digit';
+  if (Buffer.byteLength(pw, 'utf8') > 72) return 'Password cannot be longer than 72 bytes';
   return null;
 }
 
@@ -69,7 +69,7 @@ function cleanName(v) {
   return name && name.length <= 80 ? name : null;
 }
 
-/* Saare active admins lock (hamesha ik hi order) — do concurrent demotions dono pass na ho jaan */
+/* Lock all active admins (always in the same order) — so two concurrent demotions can't both pass */
 async function lockActiveAdmins(conn) {
   const [rows] = await conn.query(
     "SELECT id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
@@ -93,14 +93,14 @@ router.post(
     const b = req.body || {};
     const name = cleanName(b.name);
     const email = typeof b.email === 'string' ? b.email.toLowerCase().trim() : '';
-    if (!name) return res.status(400).json({ error: 'Name chahida (max 80 characters)' });
-    if (!EMAIL_RE.test(email) || email.length > 120) return res.status(400).json({ error: 'Sahi email chahida' });
-    if (!ROLES.includes(b.role)) return res.status(400).json({ error: `Role ${ROLES.join(', ')} vichon ik hona chahida` });
+    if (!name) return res.status(400).json({ error: 'Name is required (max 80 characters)' });
+    if (!EMAIL_RE.test(email) || email.length > 120) return res.status(400).json({ error: 'A valid email is required' });
+    if (!ROLES.includes(b.role)) return res.status(400).json({ error: `Role must be one of ${ROLES.join(', ')}` });
     const pwErr = passwordError(b.password);
     if (pwErr) return res.status(400).json({ error: pwErr });
 
     const dup = await q('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
-    if (dup[0]) return res.status(409).json({ error: 'Is email naal user pehla ton hai' });
+    if (dup[0]) return res.status(409).json({ error: 'A user with this email already exists' });
 
     const hash = await bcrypt.hash(b.password, 10);
     try {
@@ -109,31 +109,31 @@ router.post(
       ]);
       res.json({ ok: true, id: r.insertId });
     } catch (e) {
-      if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Is email naal user pehla ton hai' });
+      if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'A user with this email already exists' });
       throw e;
     }
   })
 );
 
-/* name, role, is_active, password — jo bheja ohi badlega. PATCH purane frontend (sirf role) layi. */
+/* name, role, is_active, password — only what is sent changes. PATCH is for the old frontend (role only). */
 const updateUser = a(async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Galat user id' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid user id' });
   const b = req.body || {};
   const set = {};
 
   if (b.name !== undefined) {
     const name = cleanName(b.name);
-    if (!name) return res.status(400).json({ error: 'Name chahida (max 80 characters)' });
+    if (!name) return res.status(400).json({ error: 'Name is required (max 80 characters)' });
     set.name = name;
   }
   if (b.role !== undefined) {
-    if (!ROLES.includes(b.role)) return res.status(400).json({ error: `Role ${ROLES.join(', ')} vichon ik hona chahida` });
+    if (!ROLES.includes(b.role)) return res.status(400).json({ error: `Role must be one of ${ROLES.join(', ')}` });
     set.role = b.role;
   }
   if (b.is_active !== undefined) {
     const v = parseActive(b.is_active);
-    if (v === null) return res.status(400).json({ error: 'is_active true/false hona chahida' });
+    if (v === null) return res.status(400).json({ error: 'is_active must be true/false' });
     set.is_active = v;
   }
   if (b.password !== undefined) {
@@ -142,18 +142,18 @@ const updateUser = a(async (req, res) => {
     set.password_hash = await bcrypt.hash(b.password, 10);
   }
   const cols = Object.keys(set);
-  if (!cols.length) return res.status(400).json({ error: 'Update karan layi kuchh nahi bheja' });
+  if (!cols.length) return res.status(400).json({ error: 'Nothing was sent to update' });
 
   const demotes = (set.role !== undefined && set.role !== 'admin') || set.is_active === 0;
   if (id === req.user.id && demotes)
-    return res.status(400).json({ error: 'Admin apne aap nu demote ya deactivate nahi kar sakda' });
+    return res.status(400).json({ error: 'An admin cannot demote or deactivate themselves' });
 
   const result = await tx(async (conn) => {
     const admins = await lockActiveAdmins(conn);
     const [rows] = await conn.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [id]);
-    if (!rows[0]) return { status: 404, error: 'User nahi mila' };
+    if (!rows[0]) return { status: 404, error: 'User not found' };
     if (demotes && admins.includes(id) && admins.length <= 1)
-      return { status: 400, error: 'Aakhri active admin nu demote ya deactivate nahi kar sakde' };
+      return { status: 400, error: 'The last active admin cannot be demoted or deactivated' };
     await conn.query(`UPDATE users SET ${cols.map((c) => `\`${c}\` = ?`).join(', ')} WHERE id = ?`, [
       ...cols.map((c) => set[c]),
       id,
@@ -173,14 +173,14 @@ router.delete(
   a(async (req, res) => {
     const id = Number(req.params.id);
     if (id === req.user.id)
-      return res.status(400).json({ error: 'Apne aap nu delete nahi kar sakde' });
+      return res.status(400).json({ error: 'You cannot delete yourself' });
     const blocked = await tx(async (conn) => {
       const admins = await lockActiveAdmins(conn);
       if (admins.includes(id) && admins.length <= 1) return true;
       await conn.query('DELETE FROM users WHERE id = ?', [id]);
       return false;
     });
-    if (blocked) return res.status(400).json({ error: 'Aakhri active admin nu delete nahi kar sakde' });
+    if (blocked) return res.status(400).json({ error: 'The last active admin cannot be deleted' });
     res.json({ ok: true });
   })
 );

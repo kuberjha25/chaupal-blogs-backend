@@ -53,11 +53,11 @@ const quizConfig = {
   },
 };
 
-/* Production me default password naal admin kade nahi banana */
+/* Never create the admin with the default password in production */
 function assertAdminPassword(pw = process.env.ADMIN_PASSWORD) {
   if (process.env.NODE_ENV === 'production' && (!pw || pw === 'CHANGE_ME')) {
     throw new Error(
-      'ADMIN_PASSWORD is missing or CHANGE_ME — production first admin nahi banaya. Set ADMIN_PASSWORD in .env and restart.'
+      'ADMIN_PASSWORD is missing or CHANGE_ME — the first production admin was not created. Set ADMIN_PASSWORD in .env and restart.'
     );
   }
 }
@@ -98,7 +98,7 @@ async function essentialData(conn, opts = {}) {
   const settings = {
     site_title: 'Chaupal Te Charcha',
     tagline: 'Stories, trailers te charcha from the world of Chaupal',
-    /* Live blog.chaupal.com (Yoast) ton — SEO continuity; Studio > Settings ton editable */
+    /* From the live blog.chaupal.com (Yoast) — SEO continuity; editable from Studio > Settings */
     seo_home_title: 'Chaupal - Trending Punjabi Movies and Series Updates',
     seo_home_description: 'Chaupal provides the latest entertainment updates & insights on popular movies and trends across Punjabi, Haryanvi & Bhojpuri cinema.',
     twitter_handle: '@chaupaltv',

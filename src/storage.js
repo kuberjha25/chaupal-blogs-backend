@@ -1,7 +1,7 @@
 /* Image storage service.
-   ABHI: local folder (backend/uploads) — har image sharp se WebP me convert ho ke save hoti hai.
-   BAAD ME (S3): sirf is file ke andar save/remove ko S3 putObject/deleteObject se badalna hai.
-   Baaki poora app storage.save() / storage.remove() hi use karta hai. */
+   NOW: local folder (backend/uploads) — every image is converted to WebP with sharp and saved.
+   LATER (S3): only save/remove inside this file need to change to S3 putObject/deleteObject.
+   The rest of the app only uses storage.save() / storage.remove(). */
 
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +11,7 @@ const { slugify } = require('./utils');
 const UPLOAD_DIR = path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-/* buffer (koi bhi image format) → webp file. Returns saved file info. */
+/* buffer (any image format) → webp file. Returns saved file info. */
 async function save(buffer, originalName) {
   const base = slugify(path.parse(originalName || 'image').name).slice(0, 50) || 'image';
   const filename = `${Date.now()}-${base}.webp`;

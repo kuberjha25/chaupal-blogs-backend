@@ -1,4 +1,4 @@
-/* npm run vapid — naya VAPID key pair (web push). Har environment layi IK VAAR. */
+/* npm run vapid — new VAPID key pair (web push). ONCE per environment. */
 const webpush = require('web-push');
 
 const { publicKey, privateKey } = webpush.generateVAPIDKeys();

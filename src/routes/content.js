@@ -95,7 +95,7 @@ router.patch(
         `SELECT c.id FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ? AND p.author_id = ?`,
         [req.params.id, req.user.id]
       );
-      if (!own[0]) return res.status(403).json({ error: 'Eh comment tuhade post te nahi hai' });
+      if (!own[0]) return res.status(403).json({ error: 'This comment is not on your post' });
     }
     await q('UPDATE comments SET status = ? WHERE id = ?', [status, req.params.id]);
     res.json({ ok: true, status });

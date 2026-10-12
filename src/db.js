@@ -17,7 +17,7 @@ async function q(sql, params) {
   return rows;
 }
 
-/* fn(conn) ik transaction vich; error te rollback. conn.query() [rows, fields] return karda. */
+/* Runs fn(conn) in a transaction; rolls back on error. conn.query() returns [rows, fields]. */
 async function tx(fn) {
   const conn = await pool.getConnection();
   try {

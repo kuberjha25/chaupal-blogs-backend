@@ -4,10 +4,10 @@ const { a, injectToc } = require('../utils');
 const { publicWriteLimiter, readerCommentLimiter } = require('../middleware/rateLimit');
 const { sameOrigin, loadReader, requireReader } = require('../middleware/reader');
 
-/* Scheduled posts jinke time aa gaya = live */
+/* Scheduled posts whose time has come = live */
 const PUB = `(p.status = 'published' OR (p.status = 'scheduled' AND p.scheduled_at <= NOW()))`;
 
-/* Newest first. Live ho chuke scheduled posts da published_at NULL hunda, isliye scheduled_at fallback */
+/* Newest first. Scheduled posts that have gone live have a NULL published_at, hence the scheduled_at fallback */
 const NEWEST = `ORDER BY COALESCE(p.published_at, p.scheduled_at) DESC, p.id DESC`;
 
 const POST_CARD = `
@@ -35,14 +35,14 @@ async function getSettings() {
   return s;
 }
 
-/* ---------------- HOME: poora homepage ik call vich ---------------- */
+/* ---------------- HOME: the whole homepage in one call ---------------- */
 router.get(
   '/home',
   a(async (req, res) => {
     const [settings, latest, top10, moodsRows, picks, hubs, videos, sessions, calendar, pollRows, quizRows, trending] =
       await Promise.all([
         getSettings(),
-        /* Hero + agle 6 (feature 1 + side 3 + row 2) */
+        /* Hero + the next 6 (feature 1 + side 3 + row 2) */
         q(`${POST_CARD} WHERE ${PUB} ${NEWEST} LIMIT 7`),
         q(`SELECT rank_no, title, boli, link, glyph, glyph_script, tone FROM chart_items ORDER BY rank_no ASC`),
         q(`SELECT DISTINCT mood FROM watch_picks ORDER BY mood`),
@@ -71,7 +71,7 @@ router.get(
       quiz = { id: quizRows[0].id, title: quizRows[0].title, plays: quizRows[0].plays, ...JSON.parse(quizRows[0].config_json) };
     }
 
-    /* Hero hamesha sabton navaan live post (is_featured di parwah nahi) */
+    /* The hero is always the newest live post (is_featured is ignored) */
     const hero = latest[0] || null;
     const rest = latest.slice(1);
 
@@ -94,7 +94,7 @@ router.get(
   })
 );
 
-/* ---------------- ARCHIVE (paginated, views count nahi karda) ---------------- */
+/* ---------------- ARCHIVE (paginated, does not count views) ---------------- */
 router.get(
   '/posts',
   a(async (req, res) => {
@@ -130,9 +130,9 @@ router.get(
       [req.params.slug]
     );
     const post = rows[0];
-    if (!post) return res.status(404).json({ error: 'Post nahi mila' });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
 
-    /* updated_at = updated_at: view count naal ON UPDATE na chale (sitemap lastmod isi ton) */
+    /* updated_at = updated_at: so ON UPDATE doesn't fire with the view count (sitemap lastmod comes from it) */
     q('UPDATE posts SET views = views + 1, updated_at = updated_at WHERE id = ?', [post.id]).catch(() => {});
 
     const { html, toc } = injectToc(post.body_html);
@@ -166,7 +166,7 @@ router.post(
   a(async (req, res) => {
     const { optionId } = req.body || {};
     const opt = await q('SELECT id FROM poll_options WHERE id = ? AND poll_id = ?', [optionId, req.params.id]);
-    if (!opt[0]) return res.status(400).json({ error: 'Galat option' });
+    if (!opt[0]) return res.status(400).json({ error: 'Invalid option' });
     await q('UPDATE poll_options SET votes = votes + 1 WHERE id = ?', [optionId]);
     const options = await q('SELECT id, label, votes FROM poll_options WHERE poll_id = ? ORDER BY id', [req.params.id]);
     res.json({ options });
@@ -189,15 +189,15 @@ router.post(
   publicWriteLimiter,
   a(async (req, res) => {
     const email = String((req.body || {}).email || '').toLowerCase().trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Sahi email likho' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email' });
     await q('INSERT IGNORE INTO subscribers (email, source) VALUES (?, ?)', [email, 'site']);
     res.json({ ok: true });
   })
 );
 
 /* ---------------- COMMENTS ---------------- */
-/* Approved comments, purane pehla — sirf naam, initial, body, time. Email kade nahi.
-   Sabton navein 200 lai ke ulta karde haan, taaki limit naal navein comments na kattan. */
+/* Approved comments, oldest first — only name, initial, body, time. Never the email.
+   We take the newest 200 and reverse them, so the limit doesn't cut off the newest comments. */
 router.get(
   '/posts/:slug/comments',
   a(async (req, res) => {
@@ -220,7 +220,7 @@ router.get(
   })
 );
 
-/* Submit — sirf logged-in reader; naam reader account ton (body wala naam ignore). Moderation queue vich jaanda. */
+/* Submit — logged-in readers only; the name comes from the reader account (any name in the body is ignored). Goes to the moderation queue. */
 router.post(
   '/posts/:slug/comments',
   sameOrigin,
@@ -233,12 +233,12 @@ router.post(
     if (!body) return res.status(400).json({ error: 'Comment is empty' });
     if (body.length > 1000) return res.status(400).json({ error: 'Comment can be at most 1000 characters' });
     const rows = await q(`SELECT p.id FROM posts p WHERE p.slug = ? AND ${PUB}`, [req.params.slug]);
-    if (!rows[0]) return res.status(404).json({ error: 'Post nahi mila' });
+    if (!rows[0]) return res.status(404).json({ error: 'Post not found' });
     await q(
       "INSERT INTO comments (post_id, reader_id, author_name, body, status) VALUES (?, ?, ?, ?, 'pending')",
       [rows[0].id, req.reader.id, req.reader.name, body]
     );
-    res.json({ ok: true, message: 'Comment review queue vich chala gaya' });
+    res.json({ ok: true, message: 'Comment sent to the review queue' });
   })
 );
 
@@ -249,7 +249,7 @@ router.get('/push/key', (req, res) => {
   res.json({ publicKey });
 });
 
-/* ---------------- SITEMAP DATA (frontend /sitemap.xml ise use karda) ---------------- */
+/* ---------------- SITEMAP DATA (the frontend /sitemap.xml uses this) ---------------- */
 router.get(
   '/sitemap',
   a(async (req, res) => {

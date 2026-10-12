@@ -1,7 +1,7 @@
 -- Chaupal Te Charcha — MySQL schema
--- seed.js ise run karda hai (database create + tables). Manually bhi chala sakde ho.
--- Reader tables (readers, reader_otps, reader_sessions, push_subscriptions, notifications) te
--- comments.reader_id database/bootstrap.js runMigrations() vich ne — har boot te apne aap.
+-- seed.js runs this (database create + tables). You can also run it manually.
+-- Reader tables (readers, reader_otps, reader_sessions, push_subscriptions, notifications) and
+-- comments.reader_id live in database/bootstrap.js runMigrations() — applied automatically on every boot.
 
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,

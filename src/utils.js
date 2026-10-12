@@ -12,7 +12,7 @@ const slugify = (s) =>
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/* true/false/1/0/'1'/'0'/'true'/'false' → 1/0, baaki null */
+/* true/false/1/0/'1'/'0'/'true'/'false' → 1/0, anything else null */
 function parseActive(v) {
   if (v === true || v === 1 || v === '1' || v === 'true') return 1;
   if (v === false || v === 0 || v === '0' || v === 'false') return 0;
@@ -22,7 +22,7 @@ function parseActive(v) {
 /* Express async route wrapper */
 const a = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-/* Editor (TipTap) output ke liye allowed HTML — wahi tags jo studio editor banata hai */
+/* Allowed HTML for editor (TipTap) output — the same tags the studio editor produces */
 function cleanBody(html) {
   return sanitizeHtml(String(html || ''), {
     allowedTags: [
@@ -54,7 +54,7 @@ function cleanBody(html) {
   });
 }
 
-/* h2 headings ko ids do + TOC array banao (article page sidebar iske se banta hai) */
+/* Give h2 headings ids + build the TOC array (the article page sidebar is built from it) */
 function injectToc(html) {
   const toc = [];
   const out = String(html || '').replace(/<h2(?:\s[^>]*)?>([\s\S]*?)<\/h2>/gi, (m, inner) => {

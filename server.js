@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-/* Production fail-fast: zaroori env vars check. Sirf variable NAME print karo, value kade nahi. */
+/* Production fail-fast: check the required env vars. Print only the variable NAME, never the value. */
 if (process.env.NODE_ENV === 'production') {
   const bad = [];
   for (const k of ['JWT_SECRET', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']) {
@@ -11,7 +11,7 @@ if (process.env.NODE_ENV === 'production') {
     bad.push('JWT_SECRET is a placeholder or shorter than 32 characters');
   }
   if (bad.length) {
-    console.error('\nProduction env invalid — server start nahi hoya:\n  - ' + bad.join('\n  - ') + '\n');
+    console.error('\nProduction env invalid — server did not start:\n  - ' + bad.join('\n  - ') + '\n');
     process.exit(1);
   }
 }
@@ -26,7 +26,7 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
 app.use(express.json({ limit: '4mb' }));
 
-/* Uploaded webp images served statically. S3 migration me ye line hat jayegi. */
+/* Uploaded webp images served statically. This line goes away with the S3 migration. */
 app.use(
   '/uploads',
   express.static(path.join(__dirname, process.env.UPLOAD_DIR || 'uploads'), {
@@ -53,25 +53,25 @@ app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   console.error(err);
   const status = err.status || 500;
-  /* Production me 5xx details (SQL errors wagairah) client nu nahi dikhane */
+  /* In production, never show 5xx details (SQL errors etc.) to the client */
   const hide = process.env.NODE_ENV === 'production' && status >= 500;
   res.status(status).json({ error: hide ? 'Server error' : err.message || 'Server error' });
 });
 
 const PORT = process.env.PORT || 4000;
 
-/* MERN-style boot: pehla DB apne aap ensure (create + schema + first-time seed),
-   phir hi listen. Data pehla ton hai ta bootstrap kuchh nahi chhedta. */
+/* MERN-style boot: first ensure the DB automatically (create + schema + first-time seed),
+   only then listen. If data already exists, bootstrap touches nothing. */
 const { ensureDatabase, seedMode } = require('./database/bootstrap');
 
 (async () => {
   try {
     await ensureDatabase();
   } catch (e) {
-    console.error('\nDB bootstrap fail — server start nahi hoya.\n' + e.message + '\n');
+    console.error('\nDB bootstrap failed — server did not start.\n' + e.message + '\n');
     process.exit(1);
   }
-  /* Email config galat hove ta server fir bhi chalda; sirf reader signup/forgot 503 */
+  /* If the email config is wrong the server still runs; only reader signup/forgot return 503 */
   const mail = require('./src/mailer').status();
   if (!mail.configured)
     console.warn(
@@ -80,6 +80,6 @@ const { ensureDatabase, seedMode } = require('./database/bootstrap');
   else console.log(`→ Reader email: ${mail.mode}`);
   if (!process.env.VAPID_PUBLIC_KEY) console.warn('→ Web push disabled: VAPID_* env not set (npm run vapid)');
   app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
-    console.log(`Chaupal Te Charcha API chal rahi hai → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);
+    console.log(`Chaupal Te Charcha API is running → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);
   });
 })();

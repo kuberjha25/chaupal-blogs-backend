@@ -45,7 +45,7 @@ async function connectWithRetry(tries = 15, delayMs = 2000) {
         if (i === 1) console.log(`→ Waiting for MySQL (${cfg().host}:${cfg().port})... (is the server starting?)`);
         await sleep(delayMs);
       } else {
-        break; /* auth / access errors — retry da faida nahi */
+        break; /* auth / access errors — retrying won't help */
       }
     }
   }
@@ -53,16 +53,17 @@ async function connectWithRetry(tries = 15, delayMs = 2000) {
     lastErr && lastErr.code === 'ECONNREFUSED'
       ? [
           '',
-          'MySQL server chal nahi reha. Ik vaar start/auto-enable karo:',
-          '  Windows : net start MySQL80        (Admin CMD; install te default auto-start hunda hai)',
-          '  Mac     : brew services start mysql (Homebrew — login te auto-start register ho janda)',
+          'MySQL server is not running. Start it / enable auto-start once:',
+          '  Windows : net start MySQL80        (Admin CMD; auto-start is the default after install)',
+          '  Mac     : brew services start mysql (Homebrew — also registers auto-start at login)',
           '  Linux   : sudo systemctl enable --now mysql',
-          'Iton baad laptop boot te MySQL apne aap uthega — dubara kade nahi chalana painda.',
+          'After that MySQL starts by itself at boot — you never need to start it again.',
+          'If DB_HOST/DB_PORT point at an SSH tunnel, check that the tunnel is running.',
         ].join('\n')
       : lastErr && (lastErr.code === 'ER_ACCESS_DENIED_ERROR' || /Access denied/i.test(lastErr.message))
       ? '\nCheck backend/.env for DB_USER / DB_PASSWORD — MySQL rejected credentials.'
       : '';
-  const err = new Error(`MySQL connect fail: ${lastErr ? lastErr.message : 'unknown'}${hint}`);
+  const err = new Error(`MySQL connection failed: ${lastErr ? lastErr.message : 'unknown'}${hint}`);
   err.cause = lastErr;
   throw err;
 }
@@ -77,8 +78,8 @@ async function applySchemaIfMissing(conn, log) {
 }
 
 /* ---------------- Migrations: idempotent + additive only ----------------
-   schema.sql sirf khali DB te chalda hai, isliye naye columns/tables live DB te
-   ethon aunde ne. Har boot te chalde ne; kuchh missing na hove ta chup. Existing rows nu kade nahi chhedde. */
+   schema.sql only runs on an empty DB, so new columns/tables reach a live DB
+   from here. They run on every boot; silent when nothing is missing. Existing rows are never touched. */
 async function ensureColumn(conn, table, column, ddl, log) {
   const [rows] = await conn.query(
     `SELECT 1 FROM information_schema.columns
@@ -102,7 +103,7 @@ async function ensureTable(conn, name, createSql, log) {
   return true;
 }
 
-/* Column te FK alag-alag: je FK fail hove ta agli boot te dubara try (column pehla ton hon de bawajood) */
+/* Column and FK are separate: if the FK fails it is retried on the next boot (even though the column already exists) */
 async function ensureForeignKey(conn, table, name, ddl, log) {
   const [rows] = await conn.query(
     `SELECT 1 FROM information_schema.table_constraints
@@ -115,7 +116,7 @@ async function ensureForeignKey(conn, table, name, ddl, log) {
   return true;
 }
 
-/* Readers (site de paathak) — staff (users) ton bilkul alag. Order zaroori: readers pehla, FK baad ch. */
+/* Readers (site visitors) — completely separate from staff (users). Order matters: readers first, FKs after. */
 const READER_TABLES = [
   [
     'readers',
@@ -224,16 +225,16 @@ async function seedIfEmpty(conn, mode, log) {
   return true;
 }
 
-/* Server boot te — idempotent, kade destructive nahi */
+/* At server boot — idempotent, never destructive */
 async function ensureDatabase({ log = console.log } = {}) {
   const mode = seedMode();
   const conn = await connectWithRetry();
   try {
     if (mode === 'off') {
-      /* Sirf verify — DB exist karda te reachable hai */
+      /* Verify only — the DB exists and is reachable */
       await conn.query(`USE \`${DB()}\``);
       log(`→ DB "${DB()}" connected (SEED_MODE=off — no auto-create)`);
-      /* Code in columns te depend karda hai, isliye additive migrations off mode me bhi */
+      /* The code depends on these columns, so additive migrations run in off mode too */
       await runMigrations(conn, log);
       return { mode, created: false, seeded: false };
     }
@@ -242,16 +243,16 @@ async function ensureDatabase({ log = console.log } = {}) {
     const created = await applySchemaIfMissing(conn, log);
     const migrated = await runMigrations(conn, log);
     const seeded = await seedIfEmpty(conn, mode, log);
-    if (!created && !migrated && !seeded) log(`→ DB "${DB()}" ready (pehla ton seeded — kuchh nahi badleya)`);
+    if (!created && !migrated && !seeded) log(`→ DB "${DB()}" ready (already seeded — nothing changed)`);
     return { mode, created, seeded };
   } finally {
     await conn.end();
   }
 }
 
-/* CLI reset — DROP + fresh (destructive, sirf jaan-bujh ke) */
+/* CLI reset — DROP + fresh (destructive, only on purpose) */
 async function resetDatabase(mode, { log = console.log } = {}) {
-  assertAdminPassword(); /* DROP se pehla check, taaki DB uda ke fail na ho */
+  assertAdminPassword(); /* check before the DROP, so we don't fail after wiping the DB */
   const conn = await connectWithRetry();
   try {
     log(`→ Database "${DB()}" DROP + fresh ${mode} seed...`);
