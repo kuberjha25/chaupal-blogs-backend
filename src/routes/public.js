@@ -14,7 +14,7 @@ const POST_CARD = `
   SELECT p.id, p.title, p.dek, p.slug, p.read_minutes, p.views, p.ghost_glyph, p.glyph_script, p.art_tone,
          p.published_at, p.is_featured, c.name AS category, c.slug AS category_slug,
          b.name AS boli, u.name AS author,
-         m.url_path AS image, m.alt AS image_alt
+         m.url_path AS image, m.alt AS image_alt, m.width AS image_width, m.height AS image_height
   FROM posts p
   LEFT JOIN categories c ON c.id = p.category_id
   LEFT JOIN categories b ON b.id = p.boli_id
@@ -104,11 +104,46 @@ router.get(
     };
     const limit = Math.min(Math.max(int(req.query.limit, 12), 1), 24);
     const page = Math.min(Math.max(int(req.query.page, 1), 1), 100000);
+    /* Optional filters: ?category=<slug> and/or ?boli=<slug> (slugs from /api/public/taxonomy) */
+    const where = [PUB];
+    const args = [];
+    for (const [key, col] of [['category', 'c'], ['boli', 'b']]) {
+      const v = req.query[key];
+      if (typeof v === 'string' && v) {
+        where.push(`${col}.slug = ?`);
+        args.push(v.slice(0, 80));
+      }
+    }
     const [posts, [{ total }]] = await Promise.all([
-      q(`${POST_CARD} WHERE ${PUB} ${NEWEST} LIMIT ? OFFSET ?`, [limit, (page - 1) * limit]),
-      q(`SELECT COUNT(*) AS total FROM posts p WHERE ${PUB}`),
+      q(`${POST_CARD} WHERE ${where.join(' AND ')} ${NEWEST} LIMIT ? OFFSET ?`, [...args, limit, (page - 1) * limit]),
+      q(
+        `SELECT COUNT(*) AS total FROM posts p
+         LEFT JOIN categories c ON c.id = p.category_id
+         LEFT JOIN categories b ON b.id = p.boli_id
+         WHERE ${where.join(' AND ')}`,
+        args
+      ),
     ]);
     res.json({ posts, page, pages: Math.max(1, Math.ceil(total / limit)), total });
+  })
+);
+
+/* ---------------- TAXONOMY (category + boli hub pages, home rails, category sitemap) ---------------- */
+router.get(
+  '/taxonomy',
+  a(async (req, res) => {
+    const rows = await q(
+      `SELECT t.name, t.slug, t.kind, COUNT(p.id) AS post_count,
+              MAX(COALESCE(p.updated_at, p.published_at)) AS lastmod
+       FROM categories t
+       LEFT JOIN posts p ON (p.category_id = t.id OR p.boli_id = t.id)
+         AND (p.status = 'published' OR (p.status = 'scheduled' AND p.scheduled_at <= NOW()))
+       GROUP BY t.id ORDER BY t.kind, t.id`
+    );
+    res.json({
+      bolis: rows.filter((r) => r.kind === 'boli'),
+      categories: rows.filter((r) => r.kind === 'category'),
+    });
   })
 );
 

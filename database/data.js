@@ -62,6 +62,13 @@ function assertAdminPassword(pw = process.env.ADMIN_PASSWORD) {
   }
 }
 
+/* Old WordPress /category/<slug> pages (same slugs, so the URLs stay identical on the new site) */
+const LEGACY_CATEGORIES = [
+  ['Trending', 'trending'], ['Movie', 'movie'], ['Web Series', 'web-series'], ['Artist', 'artist'],
+  ['Binge Watch', 'binge-watch'], ['Chaupal Originals', 'chaupal-originals'], ['Chaupal Exclusives', 'chaupal-exclusives'],
+  ['Throwback', 'throwback'], ['Trivia', 'trivia'], ['Press Release', 'press-release'],
+];
+
 /* ================================================================
   ESSENTIAL — runs in production too (first boot, once)
   ================================================================ */
@@ -77,23 +84,14 @@ async function essentialData(conn, opts = {}) {
     [adminName, adminEmail, bcrypt.hashSync(adminPassword, 10)]
   );
 
+  /* First 8 rows keep their ids (the dummy posts below refer to category ids 4-7) — the old-WordPress ones are appended */
   await conn.query(`INSERT INTO categories (name, slug, kind) VALUES
     ('Punjabi', 'punjabi', 'boli'), ('Haryanvi', 'haryanvi', 'boli'), ('Bhojpuri', 'bhojpuri', 'boli'),
     ('Chaupal Originals', 'chaupal-originals', 'category'), ('Reviews', 'reviews', 'category'),
     ('Top 10', 'top-10', 'category'), ('News', 'news', 'category'), ('Charcha Sessions', 'charcha-sessions', 'category')`);
-
-  /* Old live blog.chaupal.com /category/ URLs — real 301s; required in production */
-  await conn.query(`INSERT INTO redirects (from_path, to_path, code, hits) VALUES
-    ('/category/trending', '/#latest', 301, 0),
-    ('/category/movie', '/#latest', 301, 0),
-    ('/category/web-series', '/#latest', 301, 0),
-    ('/category/artist', '/#latest', 301, 0),
-    ('/category/binge-watch', '/#watch', 301, 0),
-    ('/category/chaupal-originals', '/#latest', 301, 0),
-    ('/category/chaupal-exclusives', '/#latest', 301, 0),
-    ('/category/throwback', '/#latest', 301, 0),
-    ('/category/trivia', '/#play', 301, 0),
-    ('/category/press-release', '/#latest', 301, 0)`);
+  const extra = LEGACY_CATEGORIES.filter(([, slug]) => slug !== 'chaupal-originals');
+  await conn.query(`INSERT INTO categories (name, slug, kind) VALUES ${extra.map(() => "(?, ?, 'category')").join(', ')}`, extra.flat());
+  /* The old WordPress /category/<slug> URLs now exist as real pages at the same address — no redirect needed */
 
   const settings = {
     site_title: 'Chaupal Te Charcha',
@@ -268,4 +266,4 @@ async function dummyData(conn, opts = {}) {
     ('Mon', 4200), ('Tue', 5600), ('Wed', 4800), ('Thu', 6400), ('Fri', 10000), ('Sat', 8800), ('Sun', 7200)`);
 }
 
-module.exports = { essentialData, dummyData, assertAdminPassword };
+module.exports = { LEGACY_CATEGORIES, essentialData, dummyData, assertAdminPassword };
