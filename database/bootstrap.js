@@ -194,6 +194,13 @@ const READER_TABLES = [
       CONSTRAINT fk_notif_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     )`,
   ],
+  [
+    'mail_optouts',
+    `CREATE TABLE IF NOT EXISTS mail_optouts (
+      email VARCHAR(160) NOT NULL PRIMARY KEY,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ],
 ];
 
 async function runMigrations(conn, log) {
@@ -201,6 +208,16 @@ async function runMigrations(conn, log) {
   changed = (await ensureColumn(conn, 'users', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1', log)) || changed;
   for (const [name, sql] of READER_TABLES) changed = (await ensureTable(conn, name, sql, log)) || changed;
   changed = (await ensureColumn(conn, 'comments', 'reader_id', 'INT NULL', log)) || changed;
+  /* posts.notified_at — set once the "new story" push + email went out. When the column is first added, every post that
+     is already live is marked as notified, so the first boot never announces the whole back catalogue. */
+  if (await ensureColumn(conn, 'posts', 'notified_at', 'DATETIME NULL', log)) {
+    await conn.query(
+      `UPDATE posts SET notified_at = NOW(), updated_at = updated_at
+       WHERE status = 'published' OR (status = 'scheduled' AND scheduled_at <= NOW())`
+    );
+    log('→ Migration: existing live posts marked as already notified');
+    changed = true;
+  }
   changed =
     (await ensureForeignKey(
       conn, 'comments', 'fk_c_reader',

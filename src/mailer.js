@@ -90,7 +90,7 @@ function ses() {
   return sesClient;
 }
 
-async function sendSes({ to, subject, text, html }) {
+async function sendSes({ to, subject, text, html, headers }) {
   const { SendEmailCommand } = require('@aws-sdk/client-sesv2');
   const content = (data) => ({ Data: data, Charset: 'UTF-8' });
   await ses().send(
@@ -101,6 +101,7 @@ async function sendSes({ to, subject, text, html }) {
         Simple: {
           Subject: content(subject),
           Body: { Text: content(text), ...(html ? { Html: content(html) } : {}) },
+          ...(headers ? { Headers: Object.entries(headers).map(([Name, Value]) => ({ Name, Value })) } : {}),
         },
       },
     })
@@ -141,7 +142,7 @@ function smtpTransport(cfg) {
   return smtp.transport;
 }
 
-async function sendSmtp({ to, subject, text, html }) {
+async function sendSmtp({ to, subject, text, html, headers }) {
   const cfg = smtpConfig();
   if (cfg.missing.length) throw new MailConfigError(`Email is not configured: missing or invalid ${cfg.missing.join(', ')}`);
   try {
@@ -152,6 +153,7 @@ async function sendSmtp({ to, subject, text, html }) {
       subject,
       text,
       ...(html ? { html } : {}),
+      ...(headers ? { headers } : {}),
       envelope: { from: fromAddress(cfg.from), to: [to] },
     });
   } catch (e) {
@@ -168,7 +170,7 @@ function closeMail() {
 }
 
 /* ---------------- send ---------------- */
-async function sendMail({ to, subject, text, html }) {
+async function sendMail({ to, subject, text, html, headers }) {
   const st = status();
   if (!st.configured) throw new MailConfigError(`Email is not configured: ${st.reason}`);
 
@@ -176,8 +178,8 @@ async function sendMail({ to, subject, text, html }) {
     console.log(`[DEV MAIL] to=${to} subject=${subject} text=${String(text).replace(/\s+/g, ' ').trim()}`);
     return;
   }
-  if (st.mode === 'smtp') return sendSmtp({ to, subject, text, html });
-  return sendSes({ to, subject, text, html });
+  if (st.mode === 'smtp') return sendSmtp({ to, subject, text, html, headers });
+  return sendSes({ to, subject, text, html, headers });
 }
 
 function otpEmail(code, purpose) {

@@ -79,6 +79,7 @@ const { ensureDatabase, seedMode } = require('./database/bootstrap');
     );
   else console.log(`→ Reader email: ${mail.mode}`);
   if (!process.env.VAPID_PUBLIC_KEY) console.warn('→ Web push disabled: VAPID_* env not set (npm run vapid)');
+  require('./src/notifier').start();
   app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
     console.log(`Chaupal Te Charcha API is running → http://localhost:${PORT}  (SEED_MODE=${seedMode()})`);
   });

@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { q } = require('../db');
 const { a, injectToc } = require('../utils');
 const { publicWriteLimiter, readerCommentLimiter } = require('../middleware/rateLimit');
+const { validUnsubToken } = require('../notifier');
 const { sameOrigin, loadReader, requireReader } = require('../middleware/reader');
 
 /* Scheduled posts whose time has come = live */
@@ -226,6 +227,24 @@ router.post(
     const email = String((req.body || {}).email || '').toLowerCase().trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email' });
     await q('INSERT IGNORE INTO subscribers (email, source) VALUES (?, ?)', [email, 'site']);
+    /* Signing up again is a fresh yes — lift an earlier unsubscribe */
+    await q('DELETE FROM mail_optouts WHERE email = ?', [email]);
+    res.json({ ok: true });
+  })
+);
+
+/* One-click unsubscribe — from the email link (page) and the List-Unsubscribe header (mail apps POST here).
+   The token is an HMAC of the address, so nobody can unsubscribe somebody else. Email + token come from the body or the query. */
+router.post(
+  '/unsubscribe',
+  publicWriteLimiter,
+  a(async (req, res) => {
+    const email = String((req.body && req.body.email) || req.query.e || '').toLowerCase().trim();
+    const token = (req.body && req.body.token) || req.query.t;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 160 || !validUnsubToken(email, token)) {
+      return res.status(400).json({ error: 'This unsubscribe link is not valid' });
+    }
+    await q('INSERT IGNORE INTO mail_optouts (email) VALUES (?)', [email]);
     res.json({ ok: true });
   })
 );
